@@ -100,7 +100,7 @@
                   执行举报局分析
                 </button>
               </div>
-              <p class="investigation-note">哨兵分析可多选，将按比赛名次依次分析每位选手最近 30 局五分钟对局并汇总报告；举报局分析必须只选择一位选手。</p>
+              <p class="investigation-note">哨兵分析可多选，将按比赛名次依次分析每位选手符合至少 16 个实际落子标准的最近 30 局五分钟对局并汇总报告；举报局分析必须只选择一位选手。</p>
             </section>
 
             <section class="past-batch-status hidden" id="past-batch-status" aria-live="polite">
@@ -173,11 +173,11 @@
               <div class="investigation-workflow-grid hidden" id="investigation-workflow-choices">
                 <button class="investigation-workflow-choice" id="btn-investigation-manual" type="button">
                   <strong>设定举报局</strong>
-                  <small>手动勾选举报局，未勾选的对局作为对照局。</small>
+                  <small>仅使用至少完成 16 个坐标落子、已进入 ply 17 的棋局；认输、失联等结束状态不影响准入。手动勾选举报局，未勾选的棋局作为对照局（至少 8 局）。</small>
                 </button>
                 <button class="investigation-workflow-choice investigation-workflow-choice--sentinel" id="btn-investigation-sentinel" type="button">
                   <strong>哨兵监测模式</strong>
-                  <small>自动分析最近 30 局，完成传统哨兵、Elo 估值、举报局拟定及后续流程。</small>
+                  <small>从符合至少 16 个实际落子标准的棋局中自动分析最近 30 局，完成传统哨兵、Elo 估值、举报局拟定及后续流程。</small>
                 </button>
               </div>
 
@@ -188,7 +188,7 @@
                   <div>
                     <div class="investigation-panel__eyebrow">手动分组</div>
                     <h3 id="investigation-manual-title">设定举报局</h3>
-                    <p>勾选的对局作为举报局，未勾选的对局作为对照局。</p>
+                    <p>仅列出至少完成 16 个坐标落子、已进入 ply 17 的棋局；结束状态不影响准入。勾选为举报局，未勾选为对照局（至少保留 8 局）。</p>
                   </div>
                   <button class="investigation-link-button" id="btn-investigation-back-to-choices" type="button">返回流程选择</button>
                 </div>

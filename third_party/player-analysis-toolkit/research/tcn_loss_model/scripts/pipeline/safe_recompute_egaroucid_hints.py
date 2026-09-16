@@ -49,8 +49,7 @@ from src.egaroucid_safe import (  # noqa: E402
 
 
 COMMAND_MATRIX = Path(
-    r"C:\Users\MeroAF\Desktop\比赛编排\Egaroucid_for_Console_7_8_1_Windows_AVX512_AMD"
-    r"\console_command_matrix.md"
+    os.environ.get("PAPP_COMMAND_MATRIX", "console_command_matrix.md")
 )
 STAGE_CONFIGS = {
     "hint1": {"level": 2, "threads": 1, "use_book": False, "count": 1},

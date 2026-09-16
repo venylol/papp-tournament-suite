@@ -60,6 +60,7 @@ test("investigation restart handling never reuses a frozen acquisition", () => {
     "utf8",
   );
   assert.match(serverSource, /const groupsPending = progress[\s\S]*progress\.stages\?\.select_groups\?\.status !== "completed"/);
+  assert.match(serverSource, /groupsPending && isCurrentPlayerInvestigationCatalog\(catalog\)/);
   assert.match(serverSource, /progress\.status === "running" && progress\.stages\?\.select_groups\?\.status === "completed"/);
   assert.match(serverSource, /process\.kill\(persistedPid, 0\)/);
   assert.match(orchestrator, /allow_completed_command_change: bool = False/);
@@ -139,7 +140,6 @@ test("history API returns completed report metadata and matches launcher health 
     const health = await healthResponse.json();
     const launcher = fs.readFileSync(path.resolve(__dirname, "../../打开PAPP前端.cmd"), "utf8");
     assert.equal(health.ok, true);
-    assert.equal(health.version, "papp-local-frontend.30");
     assert.equal(health.version, launcher.match(/SERVER_VERSION=([^"\r\n]+)/)[1]);
 
     const response = await fetch(`${base}/api/player-investigation/history`);

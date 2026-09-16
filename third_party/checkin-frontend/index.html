@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="color-scheme" content="light dark" />
-    <meta name="app-version" content="online-i18n.49" />
+    <meta name="app-version" content="online-i18n.50" />
     <!-- Match Material You surface tones (closer to Pixel OS) -->
     <meta
       name="theme-color"
@@ -26,10 +26,10 @@
     <meta name="application-name" content="比赛签到助手" />
     <title>比赛签到助手（本地保存版）</title>
 
-    <link rel="manifest" href="./manifest.webmanifest?v=online-i18n.49" />
+    <link rel="manifest" href="./manifest.webmanifest?v=online-i18n.50" />
     <link rel="icon" href="./icons/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=online-i18n.49" />
+    <link rel="stylesheet" href="./styles.css?v=online-i18n.50" />
 
     <style>
       @media (prefers-color-scheme: dark) {
@@ -49,13 +49,13 @@
     </style>
 
     <!-- 仅用于导出 PNG；即使加载失败，其他功能仍可用 -->
-    <script defer src="./vendor/html2canvas.min.js?v=online-i18n.49"></script>
-    <script defer src="./tournament-adapter.js?v=online-i18n.49"></script>
-    <script defer src="./papp-score-png-renderer.js?v=online-i18n.49"></script>
-    <script defer src="./papp-standings-png-renderer.js?v=online-i18n.49"></script>
-    <script defer src="./papp-ap-ui.js?v=online-i18n.49"></script>
-    <script defer src="./app.js?v=online-i18n.49"></script>
-    <script defer src="./checkin-i18n.js?v=online-i18n.49"></script>
+    <script defer src="./vendor/html2canvas.min.js?v=online-i18n.50"></script>
+    <script defer src="./tournament-adapter.js?v=online-i18n.50"></script>
+    <script defer src="./papp-score-png-renderer.js?v=online-i18n.50"></script>
+    <script defer src="./papp-standings-png-renderer.js?v=online-i18n.50"></script>
+    <script defer src="./papp-ap-ui.js?v=online-i18n.50"></script>
+    <script defer src="./app.js?v=online-i18n.50"></script>
+    <script defer src="./checkin-i18n.js?v=online-i18n.50"></script>
   </head>
 
   <body>
@@ -564,7 +564,7 @@ Wu Jianxiang"
               继续上次进度
             </button>
             <div class="spacer"></div>
-            <label class="btn btn-tonal file-btn" for="import-json-input">
+            <label class="btn btn-tonal file-btn hidden" for="import-json-input">
               <svg class="btn__icon" aria-hidden="true">
                 <use href="#i-upload"></use>
               </svg>
@@ -700,7 +700,7 @@ Wu Jianxiang"
 
               <div class="filter-actions">
                 <button
-                  class="chip-btn"
+                  class="chip-btn hidden"
                   id="btn-call-mode"
                   type="button"
                   aria-pressed="false"
@@ -839,7 +839,7 @@ Wu Jianxiang"
               <div class="mapping-actions">
                 <button class="btn btn-tonal" id="btn-refresh-wechat-nicks" type="button">刷新群昵称</button>
                 <button class="btn btn-outlined" id="btn-validate-oq-accounts" type="button">校验 OQ 账号</button>
-                <button class="btn btn-outlined" id="btn-self-check-mapping" type="button">自检</button>
+                <button class="btn btn-outlined hidden" id="btn-self-check-mapping" type="button">自检</button>
                 <button class="btn btn-tonal" id="btn-apply-mapping-to-roster" type="button">刷写签到名单</button>
                 <button
                   class="btn btn-outlined"
@@ -853,7 +853,7 @@ Wu Jianxiang"
                   </svg>
                   <span class="btn__label">导出映射 PNG</span>
                 </button>
-                <button class="btn btn-ghost" id="btn-clear-mapping" type="button">清除映射表</button>
+                <button class="btn btn-ghost hidden" id="btn-clear-mapping" type="button">清除映射表</button>
               </div>
             </div>
 
@@ -898,61 +898,73 @@ Wu Jianxiang"
 
           <div class="score-helper">
             <div class="score-helper__setup">
-              <label class="score-round-field" for="score-round-count">
-                <span class="score-round-field__label">预赛轮次</span>
-                <input
-                  id="score-round-count"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputmode="numeric"
-                  value="5"
-                />
-              </label>
-              <button class="btn btn-tonal" id="btn-score-apply-rounds" type="button">
-                应用
-              </button>
-              <label class="score-round-field score-round-field--start" for="score-round-start">
-                <span class="score-round-field__label">本轮开始</span>
-                <input id="score-round-start" type="datetime-local" step="1" />
-              </label>
-              <button class="btn btn-tonal" id="btn-score-apply-current-time" type="button">
-                应用当前时间
-              </button>
-              <button class="btn btn-outlined" id="btn-import-score-pairings" type="button">
+              <div class="score-helper__group score-helper__group--schedule" aria-label="轮次与时间设置">
+                <label class="score-round-field" for="score-round-count">
+                  <span class="score-round-field__label">预赛轮次</span>
+                  <input
+                    id="score-round-count"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    value="5"
+                  />
+                </label>
+                <button class="btn btn-tonal" id="btn-score-apply-rounds" type="button">
+                  应用
+                </button>
+                <label class="score-round-field score-round-field--start" for="score-round-start">
+                  <span class="score-round-field__label">本轮开始</span>
+                  <input id="score-round-start" type="datetime-local" step="1" />
+                </label>
+                <button class="btn btn-tonal" id="btn-score-apply-current-time" type="button">
+                  应用当前时间
+                </button>
+              </div>
+
+              <button class="btn btn-outlined hidden" id="btn-import-score-pairings" type="button">
                 导入本轮配对
               </button>
-              <button class="btn btn-outlined" id="btn-import-papp-pairings" type="button">
+              <button class="btn btn-outlined hidden" id="btn-import-papp-pairings" type="button">
                 导入配对表文件
               </button>
-              <button class="btn btn-outlined" id="btn-refresh-score-round" type="button">
-                刷新本轮
-              </button>
-              <button class="btn btn-tonal" id="btn-export-score-pairings-png" type="button">
-                导出本轮配对 PNG
-              </button>
-              <button class="btn btn-outlined" id="btn-export-score-results-png" type="button">
-                导出本轮比分 PNG
-              </button>
-              <label class="score-round-field" for="score-oq-poll-seconds">
-                <span class="score-round-field__label">OQ轮询(s)</span>
-                <input id="score-oq-poll-seconds" type="number" min="5" step="1" inputmode="numeric" value="15" />
-              </label>
-              <button class="btn btn-tonal" id="btn-update-round-oq-scores" type="button">
-                从 OQ 更新本轮比分
-              </button>
-              <button class="btn btn-tonal" id="btn-toggle-oq-score-poll" type="button" aria-pressed="false">
-                OQ轮询
-              </button>
-              <button class="btn btn-eg-analysis btn-eg-analysis--off" id="btn-toggle-eg-analysis" type="button" aria-pressed="false">
-                EG分析
-              </button>
-              <button class="btn btn-tonal" id="btn-export-eg-performance-png" type="button">
-                导出选手表现 PNG
-              </button>
-              <button class="btn btn-outlined" id="btn-score-back-checkin" type="button">
-                返回签到
-              </button>
+
+              <div class="score-helper__group score-helper__group--oq" aria-label="OQ 与 EG 分析">
+                <label class="score-round-field" for="score-oq-poll-seconds">
+                  <span class="score-round-field__label">OQ轮询(s)</span>
+                  <input id="score-oq-poll-seconds" type="number" min="5" step="1" inputmode="numeric" value="15" />
+                </label>
+                <button class="btn btn-tonal" id="btn-update-round-oq-scores" type="button">
+                  从 OQ 更新本轮比分
+                </button>
+                <button class="btn btn-tonal" id="btn-toggle-oq-score-poll" type="button" aria-pressed="false">
+                  OQ轮询
+                </button>
+                <button class="btn btn-eg-analysis btn-eg-analysis--off" id="btn-toggle-eg-analysis" type="button" aria-pressed="false">
+                  EG分析
+                </button>
+              </div>
+
+              <div class="score-helper__group score-helper__group--exports" aria-label="PNG 导出">
+                <button class="btn btn-tonal" id="btn-export-score-pairings-png" type="button">
+                  导出本轮配对 PNG
+                </button>
+                <button class="btn btn-outlined" id="btn-export-score-results-png" type="button">
+                  导出本轮比分 PNG
+                </button>
+                <button class="btn btn-tonal" id="btn-export-eg-performance-png" type="button">
+                  导出选手表现 PNG
+                </button>
+              </div>
+
+              <div class="score-helper__group score-helper__group--navigation" aria-label="预赛登记导航">
+                <button class="btn btn-outlined" id="btn-refresh-score-round" type="button">
+                  刷新本轮
+                </button>
+                <button class="btn btn-outlined" id="btn-score-back-checkin" type="button">
+                  返回签到
+                </button>
+              </div>
             </div>
 
             <div class="score-integration-status" id="score-integration-status" role="status" aria-live="polite">

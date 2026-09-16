@@ -76,7 +76,11 @@ const PAPP_TOURNAMENT_WORKFILES_ENV = "PAPP_TOURNAMENT_WORKFILES_DIR";
 const HOST = process.env.PAPP_HOST || "127.0.0.1";
 const PORT = Number(process.env.PAPP_PORT || 4175);
 const SERVICE = "papp-local-frontend";
-const SERVICE_VERSION = "papp-local-frontend.34";
+const SERVICE_VERSION = "papp-local-frontend.37";
+const PLAYER_INVESTIGATION_ELIGIBILITY_POLICY = "at-least-16-coordinate-placements-v1";
+const PLAYER_INVESTIGATION_MINIMUM_ACTUAL_PLACEMENTS = 16;
+const PLAYER_INVESTIGATION_FIRST_ELIGIBLE_DECISION_PLY = 17;
+const PLAYER_INVESTIGATION_MINIMUM_CONTROL_GAMES = 8;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const SCRIPT_WRITE_GUARD_MS = 3000;
 const SCRIPT_RETRY_ERROR_MS = 1000;
@@ -573,9 +577,23 @@ function readPlayerInvestigationCatalog(runDir) {
   return {
     schema: value.schema,
     account: normalizeWhitespace(value.account),
+    eligibilityPolicy: normalizeWhitespace(value.eligibilityPolicy),
+    minimumActualPlacements: Number(value.minimumActualPlacements) || null,
+    firstEligibleDecisionPly: Number(value.firstEligibleDecisionPly) || null,
+    requiresRecognizedFinalStatus: value.requiresRecognizedFinalStatus === false ? false : null,
+    sourceGameCount: Number(value.sourceGameCount) || value.games.length,
+    excludedShortGameCount: Number(value.excludedShortGameCount) || 0,
     gameCount: value.games.length,
     games: value.games,
   };
+}
+
+function isCurrentPlayerInvestigationCatalog(catalog) {
+  return Boolean(catalog)
+    && catalog.eligibilityPolicy === PLAYER_INVESTIGATION_ELIGIBILITY_POLICY
+    && catalog.minimumActualPlacements === PLAYER_INVESTIGATION_MINIMUM_ACTUAL_PLACEMENTS
+    && catalog.firstEligibleDecisionPly === PLAYER_INVESTIGATION_FIRST_ELIGIBLE_DECISION_PLY
+    && catalog.requiresRecognizedFinalStatus === false;
 }
 
 function investigationSummaryNumber(value) {
@@ -661,33 +679,80 @@ function reportedAnalysisSummary(report) {
     && typeof requestedMetrics.bootstrap95PercentIntervals === "object"
     ? requestedMetrics.bootstrap95PercentIntervals
     : {};
-  const predictionDefinitions = [
-    { key: "zero", label: "零子损预测率", kind: "rate" },
-    { key: "ge4", label: "≥4 子损预测率", kind: "rate" },
-    { key: "ge10", label: "≥10 子损预测率", kind: "rate" },
-    { key: "expected_wld_loss", label: "预期 WLD 损失", kind: "number" },
-  ];
-  const predictionMetrics = predictionDefinitions
-    .map((definition) => ({
-      key: definition.key,
-      label: definition.label,
-      kind: definition.kind,
-      value: investigationSummaryNumber(pointEstimates[definition.key]),
-      interval: investigationSummaryInterval(bootstrapIntervals[definition.key]),
-    }))
-    .filter((metric) => metric.value !== null || metric.interval !== null);
-
+  const requestedActuals = requestedMetrics.actualPointEstimates
+    && typeof requestedMetrics.actualPointEstimates === "object"
+    ? requestedMetrics.actualPointEstimates
+    : {};
+  const reportedGroups = reportedModel.groups && typeof reportedModel.groups === "object"
+    ? reportedModel.groups
+    : {};
+  const combinedReportedGroup = reportedGroups.combined
+    && typeof reportedGroups.combined === "object"
+    ? reportedGroups.combined
+    : {};
+  const combinedReportedPoints = combinedReportedGroup.pointEstimates
+    && typeof combinedReportedGroup.pointEstimates === "object"
+    ? combinedReportedGroup.pointEstimates
+    : {};
   const calibration = model.controlAdaptationCalibration
     && typeof model.controlAdaptationCalibration === "object"
     ? model.controlAdaptationCalibration
     : {};
-  const hardRates = calibration.hardDecisionMatchRates
-    && typeof calibration.hardDecisionMatchRates === "object"
-    ? calibration.hardDecisionMatchRates
-    : {};
   const probabilityRates = calibration.probabilityRateCalibration
     && typeof calibration.probabilityRateCalibration === "object"
     ? calibration.probabilityRateCalibration
+    : {};
+  const predictionDefinitions = [
+    { key: "zero", label: "零子损率", kind: "rate" },
+    { key: "ge4", label: "≥4 子损率", kind: "rate" },
+    { key: "ge10", label: "≥10 子损率", kind: "rate" },
+    { key: "expected_wld_loss", label: "预期 WLD 损失", kind: "number" },
+  ];
+  const predictionMetrics = predictionDefinitions
+    .map((definition) => {
+      const insufficientSample = definition.key === "expected_wld_loss"
+        && !(Number(requestedMetrics.wldApplicableNodes) > 0);
+      const value = insufficientSample
+        ? null
+        : investigationSummaryNumber(pointEstimates[definition.key]);
+      const interval = insufficientSample
+        ? null
+        : investigationSummaryInterval(bootstrapIntervals[definition.key]);
+      const reportedPoint = combinedReportedPoints[definition.key]
+        && typeof combinedReportedPoints[definition.key] === "object"
+        ? combinedReportedPoints[definition.key]
+        : {};
+      const explicitReportedActual = investigationSummaryNumber(requestedActuals[definition.key]);
+      const reportedActual = explicitReportedActual !== null
+        ? explicitReportedActual
+        : investigationSummaryNumber(reportedPoint.gameEqualActualRate);
+      const difference = value === null || reportedActual === null
+        ? null
+        : value - reportedActual;
+      const differenceInterval = interval === null || reportedActual === null
+        ? null
+        : {
+          lower: interval.lower - reportedActual,
+          upper: interval.upper - reportedActual,
+        };
+      return {
+        key: definition.key,
+        label: definition.label,
+        kind: definition.kind,
+        insufficientSample,
+        value,
+        interval,
+        reportedActual,
+        difference,
+        differenceInterval,
+      };
+    })
+    .filter((metric) => metric.insufficientSample
+      || metric.value !== null || metric.interval !== null || metric.reportedActual !== null);
+
+  const hardRates = calibration.hardDecisionMatchRates
+    && typeof calibration.hardDecisionMatchRates === "object"
+    ? calibration.hardDecisionMatchRates
     : {};
   const hardDefinitions = [
     { key: "fourClassExact", label: "四分类完全匹配" },
@@ -1238,7 +1303,8 @@ function startPlayerInvestigation(payload) {
         && progress.stages?.fetch_games?.status === "completed"
         && progress.stages?.select_groups?.status !== "completed"
         && progress.status !== "completed";
-      if (groupsPending && fs.existsSync(path.join(candidate, "game_catalog.json"))) {
+      const catalog = groupsPending ? readPlayerInvestigationCatalog(candidate) : null;
+      if (groupsPending && isCurrentPlayerInvestigationCatalog(catalog)) {
         return playerInvestigationStatus(path.basename(candidate), false);
       }
     }
@@ -1274,6 +1340,10 @@ function startPlayerSentinelInvestigation(payload) {
   }
   const config = readInvestigationJson(path.join(sourceRunDir, "run_config.json"), "选手调查配置");
   const account = investigationAccount(config && config.account);
+  const sourceCatalog = readPlayerInvestigationCatalog(sourceRunDir);
+  if (!isCurrentPlayerInvestigationCatalog(sourceCatalog)) {
+    throw new Error("旧任务不符合当前每局至少 16 个坐标落子的筛选规则，请返回调查入口重新拉取");
+  }
   const sourceBundle = path.join(sourceRunDir, "account_bundle.json");
   if (!fs.existsSync(sourceBundle)) {
     throw new Error("已拉取的账号对局包不存在，无法启动哨兵监测");
@@ -1336,6 +1406,9 @@ function selectPlayerInvestigationGroups(payload) {
   }
   const catalog = readPlayerInvestigationCatalog(runDir);
   if (!catalog || !catalog.games.length) throw new Error("没有可供选择的对局");
+  if (!isCurrentPlayerInvestigationCatalog(catalog)) {
+    throw new Error("旧任务不符合当前每局至少 16 个坐标落子的筛选规则，请返回调查入口重新拉取");
+  }
   const available = catalog.games.map((game) => normalizeWhitespace(game.gameId));
   const availableSet = new Set(available);
   const requested = Array.isArray(input.reportedGameIds)
@@ -1346,7 +1419,9 @@ function selectPlayerInvestigationGroups(payload) {
   const missing = reported.filter((gameId) => !availableSet.has(gameId));
   if (missing.length) throw new Error(`选中的对局不在当前账户目录中：${missing.slice(0, 5).join(", ")}`);
   const control = available.filter((gameId) => !reported.includes(gameId));
-  if (!control.length) throw new Error("至少保留一局未勾选对照局");
+  if (control.length < PLAYER_INVESTIGATION_MINIMUM_CONTROL_GAMES) {
+    throw new Error(`样本不足：至少保留 ${PLAYER_INVESTIGATION_MINIMUM_CONTROL_GAMES} 局未勾选的合格对照局，当前只有 ${control.length} 局`);
+  }
 
   const args = ["select-groups", "--run-dir", runDir, "--control-unselected"];
   reported.forEach((gameId) => args.push("--reported-game-id", gameId));
@@ -3861,4 +3936,5 @@ module.exports = {
   batchSentinelStatus,
   repairBatchSentinelResult,
   listPlayerInvestigationHistory,
+  reportedAnalysisSummary,
 };

@@ -27,6 +27,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+TOOLKIT_SRC = Path(__file__).resolve().parents[4] / "src"
+if str(TOOLKIT_SRC) not in sys.path:
+    sys.path.insert(0, str(TOOLKIT_SRC))
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -34,6 +37,10 @@ if str(SCRIPT_DIR) not in sys.path:
 from src.checkpoint import load_checkpoint_payload, sha256_file
 from src.data_contract import validate_model_ready_npz
 from src.labels import decision_nodes, generate_disc_loss_labels
+from player_analysis_toolkit.investigation_eligibility import (
+    eligibility_contract,
+    validate_eligible_details,
+)
 from src.offbook import (
     ALGORITHM_LABEL,
     OFFBOOK_ENGINE_CONTRACT,
@@ -598,6 +605,10 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     source = json.loads(args.account_bundle.read_text(encoding="utf-8"))
     normalized, normalization_audit = normalize_bundle(source, args.effective_time_limit_ms)
+    validate_eligible_details(
+        normalized["details"],
+        label="personal model-materialization games",
+    )
     normalized_path = output / "normalized_account_bundle.json"
     audit_path = output / "clock_normalization_manifest.json"
     if not normalized_path.exists():
@@ -618,10 +629,7 @@ def main() -> int:
         raise ValueError("safe assembled input cannot be combined with legacy hint reuse")
     safe_manifest = None
     if safe_requested:
-        node_ids = {
-            str(item["id"]) for item in normalized["details"]
-            if any("m" in move for move in (item.get("position") or {}).get("moves", []))
-        }
+        node_ids = {str(item["id"]) for item in normalized["details"]}
         raw, safe_manifest = load_safe_assembled_raw(args.safe_assembled_raw, args.safe_assembly_manifest, node_ids)
     else:
         if args.engine_analyzer_source is None or args.engine is None:
@@ -694,6 +702,7 @@ def main() -> int:
         "level18Offbook": offbook_manifest,
         "level22ManualOffbookOverride": offbook,
         "timeControlPolicy": POLICY, "normalization": normalization_audit,
+        "investigationEligibility": eligibility_contract(),
         "sourceBundle": str(args.account_bundle.resolve()), "sourceBundleSha256": sha256_file(args.account_bundle),
         "modelReady": str(model_ready), "modelReadySha256": sha256_file(model_ready),
         "inputFeatureCount": len(checkpoint["input_features"]),

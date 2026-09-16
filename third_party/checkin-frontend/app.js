@@ -5961,7 +5961,6 @@
     let stage = registration.activeStage === "placement" ? "placement" : "semifinal";
     let current = activeScoreRegistration("final-registration");
     let helper = ensureScoreHelper();
-    let round = scoreStageRound(stage);
     scoreStageAdvanceInFlight = true;
     const busyLabel = stage === "placement" ? "正在读取最终排名…" : "正在生成决赛配对…";
     const readyLabel = stage === "placement" ? "查看最终排名" : "生成决赛与三四名赛配对";
@@ -6003,7 +6002,6 @@
       stage = registration.activeStage === "placement" ? "placement" : "semifinal";
       current = activeScoreRegistration("final-registration");
       helper = ensureScoreHelper();
-      round = scoreStageRound(stage);
       if (stage === "placement") {
         openLiveStandings("overall");
         return;
@@ -6015,12 +6013,13 @@
         return;
       }
 
+      const placementRound = scoreStageRound("placement");
       const result = assertAdapterSuccess(
         await invokeTournamentAdapter("importPairings", {
-          round,
+          round: placementRound,
           stage: "placement",
           mode: "advance-playoff-stage",
-          roundData: { round, stage: "placement", pairings: [] },
+          roundData: { round: placementRound, stage: "placement", pairings: [] },
           semifinalPairings: deepClone(registration.semifinalPairings),
         }),
         "PAPP 决赛配对生成失败",
@@ -6029,7 +6028,7 @@
       if (result.readOnly === true) throw new Error("旧版淘汰赛记录为只读，不能转换为 PAPP C 配对");
       const pairings = resultPairings(result);
       if (!pairings.length) throw new Error("PAPP 没有返回决赛和三四名赛配对");
-      setPlayoffPairings(round, pairings, { stage: "placement" });
+      setPlayoffPairings(placementRound, pairings, { stage: "placement" });
       const updated = ensurePlayoffRegistration();
       renderFinalRegistration(null, updated);
       setTournamentStageStatus(

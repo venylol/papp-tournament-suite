@@ -7,7 +7,7 @@ set "SERVER_EXE=%APP_DIR%\PAPP-Local-Frontend.exe"
 set "APP_URL=http://127.0.0.1:4175/papp-portal/"
 set "HEALTH_URL=http://127.0.0.1:4175/api/health"
 set "SERVER_SERVICE=papp-local-frontend"
-set "SERVER_VERSION=papp-local-frontend.34"
+set "SERVER_VERSION=papp-local-frontend.37"
 
 echo PAPP local frontend launcher
 echo ===========================

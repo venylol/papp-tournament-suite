@@ -4,6 +4,7 @@ import csv
 import io
 import json
 from pathlib import Path
+import sys
 import unittest
 
 import numpy as np
@@ -11,6 +12,13 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "third_party/player-analysis-toolkit/scripts/analysis/run_player_investigation.py"
+TOOLKIT_SRC = ROOT / "third_party/player-analysis-toolkit/src"
+sys.path.insert(0, str(TOOLKIT_SRC))
+
+from player_analysis_toolkit.investigation_eligibility import (
+    actual_placement_count,
+    validate_eligible_details,
+)
 
 
 class CsvSource:
@@ -26,30 +34,35 @@ class GameCountTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8-sig"))
         functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-                     and node.name in {"hint_source_game_count", "run_safe_hints", "validate_reported_moves"}]
+                     and node.name in {"hint_source_game_count", "run_safe_hints", "validate_group_placements"}]
         self.namespace = {"Path": Path, "csv": csv, "Run": object,
                           "read_json": lambda value: value,
                           "MODEL_ROOT": ROOT, "TOOLKIT_ROOT": ROOT}
         self.namespace["Any"] = object
         self.namespace["details"] = lambda bundle: bundle["details"]
+        self.namespace["validate_eligible_details"] = validate_eligible_details
         exec(compile(ast.Module(body=functions, type_ignores=[]), str(SCRIPT), "exec"), self.namespace)
+        placements = [{"m": f"{chr(ord('a') + index % 8)}{index // 8 + 1}"} for index in range(16)]
         self.bundle = {"details": [
-            {"id": "played", "position": {"moves": [{"m": "d3"}, {"m": "-"}]}},
+            {"id": "played", "position": {"moves": placements + [{"s": "LOSE:RESIGN"}]}},
+        ]}
+        self.short_bundle = {"details": [
             {"id": "resigned", "position": {"moves": [{"s": "LOSE:RESIGN"}]}},
         ]}
 
     def count(self, text, bundle=None):
         return self.namespace["hint_source_game_count"](CsvSource(text), bundle or self.bundle)
 
-    def test_zero_move_game_is_not_a_node_game(self):
+    def test_eligible_game_is_counted(self):
         self.assertEqual(self.count("game_id\nplayed\nplayed\n"), 1)
 
-    def test_zero_move_report_is_rejected_before_analysis(self):
-        with self.assertRaisesRegex(ValueError, "没有落子记录"):
-            self.namespace["validate_reported_moves"](self.bundle, {"resigned"})
+    def test_short_game_is_rejected_before_analysis(self):
+        with self.assertRaisesRegex(ValueError, "at least 16 coordinate placements"):
+            self.namespace["validate_group_placements"](self.short_bundle, {"resigned"})
 
-    def test_zero_move_control_does_not_block_played_report(self):
-        self.namespace["validate_reported_moves"](self.bundle, {"played"})
+    def test_sixteenth_placement_then_resign_is_eligible(self):
+        self.assertEqual(actual_placement_count(self.bundle["details"][0]), 16)
+        self.namespace["validate_group_placements"](self.bundle, {"played"})
 
     def test_missing_played_game_is_still_rejected(self):
         with self.assertRaisesRegex(ValueError, "missing=.*played"):
@@ -59,9 +72,9 @@ class GameCountTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected=.*extra"):
             self.count("game_id\nplayed\nextra\n")
 
-    def test_all_empty_games_fail_clearly(self):
-        with self.assertRaisesRegex(ValueError, "no transcript moves"):
-            self.count("game_id\n", {"details": self.bundle["details"][1:]})
+    def test_all_short_games_fail_clearly(self):
+        with self.assertRaisesRegex(ValueError, "at least 16 coordinate placements"):
+            self.count("game_id\n", self.short_bundle)
 
     def test_cached_manifest_count_does_not_reach_assembly(self):
         commands = []

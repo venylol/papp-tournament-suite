@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 
-SOURCE_RESEARCH_ROOT = Path(r"C:\Users\MeroAF\Desktop\repo_practiceAI\Egaroucid\research")
+SOURCE_RESEARCH_ROOT = Path(os.environ.get("PAPP_RESEARCH_ROOT", "research"))
 DEFAULT_USERS = SOURCE_RESEARCH_ROOT / "oq_reversi_5min_rating_2000_users.csv"
 DEFAULT_GAMES = SOURCE_RESEARCH_ROOT / "oq_reversi_5min_elo2000_games/games.csv"
 DEFAULT_SUMMARIES = SOURCE_RESEARCH_ROOT / "oq_reversi_5min_elo2000_games/game_player_summaries.csv"

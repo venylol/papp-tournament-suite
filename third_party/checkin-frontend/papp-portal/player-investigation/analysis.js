@@ -523,14 +523,22 @@
 
     const prediction = data.reportedPrediction || {};
     const predictionRows = (Array.isArray(prediction.metrics) ? prediction.metrics : []).map((metric) => {
+      if (metric.insufficientSample) {
+        return [metric.label, "样本不足", "样本不足", "—", "—"];
+      }
       const isRate = metric.kind === "rate";
       const point = isRate ? formatRate(metric.value) : formatMetricNumber(metric.value, 3);
-      const interval = metric.interval
-        ? isRate
-          ? formatRateInterval(metric.interval)
-          : `[${formatMetricNumber(metric.interval.lower, 3)}, ${formatMetricNumber(metric.interval.upper, 3)}]`
-        : "—";
-      return [metric.label, point, interval];
+      const reportedActual = isRate
+        ? formatRate(metric.reportedActual)
+        : formatMetricNumber(metric.reportedActual, 3);
+      const differenceKind = isRate ? "percentagePoints" : "number";
+      return [
+        metric.label,
+        point,
+        reportedActual,
+        formatMetricDifference(metric.difference, differenceKind),
+        formatDifferenceInterval(metric.differenceInterval, differenceKind),
+      ];
     });
     const predictionDetails = [];
     if (prediction.reportedGameCount !== null && prediction.reportedGameCount !== undefined) {
@@ -546,12 +554,16 @@
       predictionDetails.push(`${formatMetricNumber(prediction.bootstrapReplicates, 0)} 次 Bootstrap`);
     }
     const predictionSection = appendReportSection(
-      "举报局下的模型预测",
-      `${predictionDetails.join("；") || ""}${predictionDetails.length ? "。" : ""}预测区间不是作弊概率。`,
+      "举报局模型预测与举报局实测的差值",
+      `${predictionDetails.join("；") || ""}${predictionDetails.length ? "。" : ""}差值方向为举报局模型预测减去举报局实测值；区间为每个模型 Bootstrap 复本减去固定的举报局实测值。差值区间不是作弊概率。`,
       section,
     );
     if (predictionRows.length) {
-      appendReportTable(predictionSection, ["指标", "预测结果", "Bootstrap 95% CI"], predictionRows);
+      appendReportTable(
+        predictionSection,
+        ["指标", "举报局模型预测", "举报局实测", "差值", "差值 Bootstrap 95% CI"],
+        predictionRows,
+      );
     } else if (prediction.status && prediction.status !== "completed") {
       const unavailable = document.createElement("p");
       unavailable.className = "investigation-analysis__report-note";

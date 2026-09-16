@@ -18,10 +18,23 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from player_analysis_toolkit.egaroucid_worker_budget import max_background_egaroucid_workers
 from typing import Any, Iterable
 
 import numpy as np
+
+TOOLKIT_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = TOOLKIT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from player_analysis_toolkit.egaroucid_worker_budget import max_background_egaroucid_workers
+from player_analysis_toolkit.investigation_eligibility import (
+    FIRST_ELIGIBLE_DECISION_PLY,
+    MINIMUM_ACTUAL_PLACEMENTS,
+    actual_placement_count,
+    eligibility_contract,
+    validate_eligible_details,
+)
 
 try:
     import torch
@@ -29,7 +42,6 @@ except ModuleNotFoundError:
     torch = None
 
 
-TOOLKIT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_ROOT = TOOLKIT_ROOT / "research" / "tcn_loss_model"
 PROJECT_ROOT = TOOLKIT_ROOT.parent
 # The source toolkit sits beside the PAPP checkout; the bundled toolkit sits
@@ -48,6 +60,7 @@ DEFAULT_ELO_CONFIG = DEFAULT_ELO_V4_CONFIG
 SCHEMA_CONFIG = "player-investigation-run-config-v1"
 SCHEMA_PROGRESS = "player-investigation-progress-v1"
 WAITING_EXIT_CODE = 0
+MINIMUM_MODEL_CONTROL_GAMES = 8
 STAGE_ORDER = (
     "fetch_games",
     "select_groups",
@@ -367,6 +380,14 @@ def player_ids(detail: dict[str, Any]) -> tuple[str, str]:
     return str(players[0].get("id") or ""), str(players[1].get("id") or "")
 
 
+def account_game_details(bundle: dict[str, Any], account: str) -> list[dict[str, Any]]:
+    target = account.casefold()
+    return [
+        detail for detail in details(bundle)
+        if target in {player.casefold() for player in player_ids(detail)}
+    ]
+
+
 def game_result(detail: dict[str, Any], target_color: str) -> str:
     """Return the target player's W/D/L from the public game status."""
     status = str(detail.get("finalStatus") or "").strip()
@@ -407,17 +428,20 @@ def game_result(detail: dict[str, Any], target_color: str) -> str:
         losing_color = "black" if turns_before_loss % 2 == 0 else "white"
         return "loss" if target_color == losing_color else "win"
 
-    raise ValueError(f"game {detail.get('id')} has an unsupported final status: {status!r}")
+    # Game eligibility is intentionally independent of terminal status.  Keep
+    # the catalog row selectable even when OQ has no recognized final result.
+    return "unknown"
 
 
 def game_catalog(bundle: dict[str, Any], account: str) -> list[dict[str, Any]]:
     rows = []
     target = account.casefold()
-    for detail in sorted(details(bundle), key=lambda item: (str(item.get("created") or ""), str(item.get("id") or ""))):
+    for detail in sorted(account_game_details(bundle, account), key=lambda item: (str(item.get("created") or ""), str(item.get("id") or ""))):
+        placement_count = actual_placement_count(detail)
+        if placement_count < MINIMUM_ACTUAL_PLACEMENTS:
+            continue
         players = detail.get("players") or []
         black, white = player_ids(detail)
-        if target not in {black.casefold(), white.casefold()}:
-            continue
         target_color = "black" if black.casefold() == target else "white"
         opponent = players[1] if target_color == "black" else players[0]
         rows.append({
@@ -430,10 +454,15 @@ def game_catalog(bundle: dict[str, Any], account: str) -> list[dict[str, Any]]:
             "blackAccount": black,
             "whiteAccount": white,
             "result": game_result(detail, target_color),
-            "sourceMoveCount": len((detail.get("position") or {}).get("moves") or []),
+            "sourceMoveCount": placement_count,
+            "actualPlacementCount": placement_count,
         })
     if not rows:
-        raise ValueError(f"bundle contains no games for account {account!r}")
+        raise ValueError(
+            f"bundle contains no games for account {account!r} with at least "
+            f"{MINIMUM_ACTUAL_PLACEMENTS} actual placements (reaching ply "
+            f"{FIRST_ELIGIBLE_DECISION_PLY})"
+        )
     return rows
 
 
@@ -457,7 +486,11 @@ def selected_bundle(source: dict[str, Any], selected_ids: set[str]) -> dict[str,
     selected_index = [item for item in source.get("index", []) if str(item.get("id") or "") in selected_ids]
     result = dict(source)
     result["schema"] = "oq-account-bundle-selected-investigation-v1"
-    result["selection"] = {"gameIds": sorted(selected_ids), "sourceBundleSchema": source.get("schema")}
+    result["selection"] = {
+        "gameIds": sorted(selected_ids),
+        "sourceBundleSchema": source.get("schema"),
+        **eligibility_contract(),
+    }
     result["details"] = selected_details
     result["index"] = selected_index
     return result
@@ -543,6 +576,12 @@ def fetch_games(run: Run, source_bundle: Path | None = None) -> None:
         ]
         run.run_stage("fetch_games", command, [bundle_path])
     bundle = read_json(bundle_path)
+    account_details = account_game_details(bundle, run.config["account"])
+    excluded_short_game_ids = sorted(
+        str(item.get("id") or "")
+        for item in account_details
+        if actual_placement_count(item) < MINIMUM_ACTUAL_PLACEMENTS
+    )
     acquisition_report_path = run.path("acquisition_report.json")
     if not acquisition_report_path.is_file():
         acquisition = bundle.get("acquisition") if isinstance(bundle.get("acquisition"), dict) else {}
@@ -561,6 +600,10 @@ def fetch_games(run: Run, source_bundle: Path | None = None) -> None:
             "detailFetchedGameCount": detail_count,
             "detailFailureGameCount": len(failure_ids),
             "detailFailureGameIds": failure_ids,
+            **eligibility_contract(),
+            "eligibleGameCount": len(account_details) - len(excluded_short_game_ids),
+            "excludedShortGameCount": len(excluded_short_game_ids),
+            "excludedShortGameIds": excluded_short_game_ids,
             "coverageStatus": "complete" if warning is None else "partial",
             "coverageWarning": warning,
             "source": "provided-bundle",
@@ -568,7 +611,13 @@ def fetch_games(run: Run, source_bundle: Path | None = None) -> None:
     catalog = game_catalog(bundle, run.config["account"])
     atomic_write_json(run.path("game_catalog.json"), {
         "schema": "player-investigation-game-catalog-v1",
-        "account": run.config["account"], "gameCount": len(catalog), "games": catalog,
+        "account": run.config["account"],
+        **eligibility_contract(),
+        "sourceGameCount": len(account_details),
+        "excludedShortGameCount": len(excluded_short_game_ids),
+        "excludedShortGameIds": excluded_short_game_ids,
+        "gameCount": len(catalog),
+        "games": catalog,
     })
     fetch_stage = run.progress["stages"]["fetch_games"]
     fetch_outputs = [
@@ -585,8 +634,10 @@ def fetch_games(run: Run, source_bundle: Path | None = None) -> None:
             "select-groups --run-dir ... --reported-from ISO8601 --reported-to ISO8601",
         ],
         "policy": (
+            "Only games with at least 16 actual placements (reaching ply 17) are eligible. "
             "Both groups must be non-empty and disjoint. Explicit selection excludes unselected games; "
-            "time-range selection reports every game in the inclusive created-time range and controls every other game."
+            "time-range selection reports every eligible game in the inclusive created-time range and controls "
+            "every other eligible game."
         ),
     })
     run.set_overall("awaiting_group_selection", "select_groups")
@@ -624,20 +675,11 @@ def groups_from_time_range(run: Run, start: str, stop: str) -> tuple[list[str], 
     }
 
 
-def validate_reported_moves(bundle: dict[str, Any], reported_ids: set[str]) -> None:
-    empty_ids = sorted(
-        str(item["id"]) for item in details(bundle)
-        if str(item["id"]) in reported_ids
-        and not any(
-            str(move.get("m") or "").strip() not in {"", "-"}
-            for move in (item.get("position") or {}).get("moves", [])
-        )
+def validate_group_placements(bundle: dict[str, Any], selected_ids: set[str]) -> None:
+    validate_eligible_details(
+        (item for item in details(bundle) if str(item.get("id") or "") in selected_ids),
+        label="reported and control games",
     )
-    if empty_ids:
-        raise ValueError(
-            "所选举报局没有落子记录，无法进行模型调查，请改选有棋步的对局："
-            + ", ".join(empty_ids)
-        )
 
 
 def select_groups(
@@ -649,6 +691,11 @@ def select_groups(
     reported_ids, control_ids = set(reported), set(control)
     if not reported_ids or not control_ids:
         raise ValueError("reported and control groups must both be non-empty")
+    if len(control_ids) < MINIMUM_MODEL_CONTROL_GAMES:
+        raise ValueError(
+            f"样本不足：模型分析至少需要 {MINIMUM_MODEL_CONTROL_GAMES} 局合格对照局，"
+            f"当前只有 {len(control_ids)} 局"
+        )
     overlap = sorted(reported_ids & control_ids)
     if overlap:
         raise ValueError(f"reported/control groups overlap: {overlap}")
@@ -670,8 +717,8 @@ def select_groups(
     missing = sorted((reported_ids | control_ids) - available)
     if missing:
         raise ValueError(f"selected game IDs are absent from account bundle: {missing}")
-    validate_reported_moves(source, reported_ids)
     selected_ids = reported_ids | control_ids
+    validate_group_placements(source, selected_ids)
     filtered = selected_bundle(source, selected_ids)
     filtered_path = run.path("selected_account_bundle.json")
     atomic_write_json(filtered_path, filtered)
@@ -832,6 +879,23 @@ def run_sentinel_pre_scan_stages(run: Run) -> None:
     ])
 
     selected = run.path("selected_account_bundle.json")
+    selected_value = read_json(selected)
+    validate_eligible_details(
+        details(selected_value),
+        label="Sentinel investigation games",
+    )
+    elo_config_path = require_file(
+        Path(run.config.get("eloReferenceConfig", DEFAULT_ELO_CONFIG)),
+        "Sentinel Elo reference config",
+    )
+    minimum_games = int(read_json(elo_config_path)["minimumTargetGames"])
+    selected_game_count = len(details(selected_value))
+    if selected_game_count < minimum_games:
+        raise ValueError(
+            f"样本不足：Sentinel 正式分析至少需要 {minimum_games} 局合格棋局，"
+            f"按每局至少 {MINIMUM_ACTUAL_PLACEMENTS} 个坐标落子筛选后只有 "
+            f"{selected_game_count} 局"
+        )
     profiles = run.path("profiles")
     profile_command = [
         run.python(), str(MODEL_ROOT / "scripts" / "data" / "fetch_oq_player_profiles.py"),
@@ -911,6 +975,11 @@ def run_sentinel_scan_stages(run: Run) -> dict[str, Any]:
     ]
     run.run_stage("sentinel_group_freeze", freeze_command, [selection, model_groups])
     frozen = read_json(selection)
+    if frozen["reportedGameIds"] and len(frozen["modelControlGameIds"]) < MINIMUM_MODEL_CONTROL_GAMES:
+        raise ValueError(
+            f"样本不足：模型复核至少需要 {MINIMUM_MODEL_CONTROL_GAMES} 局合格对照局，"
+            f"Sentinel 分组后只有 {len(frozen['modelControlGameIds'])} 局"
+        )
     run.config["reportedGameIds"] = list(frozen["reportedGameIds"])
     run.config["controlGameIds"] = list(frozen["modelControlGameIds"])
     run.config["excludedGameIds"] = []
@@ -948,6 +1017,14 @@ def run_sentinel_unified_analysis(run: Run) -> None:
             run.path("player_phase_analysis.csv"),
         ],
     )
+    estimated_elo = read_json(run.path("estimated_elo") / "estimated_elo.json")
+    if estimated_elo.get("status") == "insufficient_target_games":
+        selected_count = int(estimated_elo.get("selectedGameCount") or 0)
+        minimum_count = int(estimated_elo.get("formalMinimumGameCount") or 10)
+        raise ValueError(
+            f"样本不足：Sentinel 正式 Elo 至少需要 {minimum_count} 局可用棋局，"
+            f"当前只有 {selected_count} 局"
+        )
 
 
 def set_stages_not_applicable(run: Run, stages: Iterable[str], reason: str) -> None:
@@ -1054,12 +1131,10 @@ def run_sentinel(run: Run) -> None:
 
 
 def hint_source_game_count(source_csv: Path, bundle_path: Path) -> int:
-    """Support cached source manifests while rejecting missing nonempty games."""
+    """Require the hint source to cover every eligible selected game."""
     bundle = read_json(bundle_path)
-    expected_ids = {
-        str(item["id"]) for item in bundle["details"]
-        if any("m" in move for move in (item.get("position") or {}).get("moves", []))
-    }
+    validate_eligible_details(bundle["details"], label="selected hint-source games")
+    expected_ids = {str(item["id"]) for item in bundle["details"]}
     with source_csv.open("r", encoding="utf-8", newline="") as handle:
         actual_ids = {row["game_id"] for row in csv.DictReader(handle)}
     if actual_ids != expected_ids:
@@ -1136,8 +1211,9 @@ def offbook_map(run: Run) -> tuple[dict[str, int], list[str]]:
 
 
 def run_model_and_report_stages(run: Run) -> None:
-    validate_reported_moves(
-        read_json(run.path("selected_account_bundle.json")), set(run.config["reportedGameIds"])
+    validate_group_placements(
+        read_json(run.path("selected_account_bundle.json")),
+        set(run.config["reportedGameIds"]) | set(run.config["controlGameIds"]),
     )
     if not run.path("offbook_records.json").is_file():
         raise RuntimeError("algorithmic off-book records are required")
@@ -1583,7 +1659,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sentinel_start = commands.add_parser(
         "start-sentinel",
-        help="investigate the most recent 30 games with coordinate placements using Sentinel V4",
+        help="investigate the most recent 30 games with at least 16 actual placements using Sentinel V4",
     )
     sentinel_start.add_argument("--account", required=True)
     sentinel_start.add_argument("--output-dir", type=Path, required=True)

@@ -7,7 +7,6 @@ import argparse
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,6 +20,13 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from player_analysis_toolkit import sentinel  # noqa: E402
+from player_analysis_toolkit.investigation_eligibility import (  # noqa: E402
+    FIRST_ELIGIBLE_DECISION_PLY,
+    MINIMUM_ACTUAL_PLACEMENTS,
+    actual_placement_count,
+    eligibility_contract,
+    is_investigation_eligible,
+)
 
 
 DETECT_PATH = TOOLKIT_ROOT / "scripts" / "analysis" / "detect_offbook.py"
@@ -29,18 +35,6 @@ if DETECT_SPEC is None or DETECT_SPEC.loader is None:
     raise RuntimeError(f"cannot import deterministic off-book algorithm: {DETECT_PATH}")
 DETECT = importlib.util.module_from_spec(DETECT_SPEC)
 DETECT_SPEC.loader.exec_module(DETECT)
-PLACEMENT_RE = re.compile(r"^[a-h][1-8]$", re.IGNORECASE)
-
-
-def has_coordinate_placement(detail: dict[str, Any]) -> bool:
-    events = (detail.get("position") or {}).get("moves") or []
-    return any(
-        isinstance(event, dict)
-        and PLACEMENT_RE.fullmatch(str(event.get("m") or "").strip()) is not None
-        for event in events
-    )
-
-
 def require_ok(path: Path, expected_count: int) -> dict[str, Any]:
     value = sentinel.read_json(path)
     if value.get("ok") is not True:
@@ -310,8 +304,8 @@ def command_acquire(args: argparse.Namespace) -> int:
     detail_fetched_count = int(acquisition.get("detailFetchedGameCount") or len(bundle.get("details", [])))
     detail_failure_ids = [str(value) for value in acquisition.get("detailFailureGameIds", []) if str(value)]
     requested_maximum = min(30, listed_game_count)
-    excluded_zero_placement_ids = sorted(
-        str(row.get("id") or "") for row in details if not has_coordinate_placement(row)
+    excluded_short_game_ids = sorted(
+        str(row.get("id") or "") for row in details if not is_investigation_eligible(row)
     )
     coverage_warning = acquisition.get("coverageWarning")
     if len(details) < listed_game_count:
@@ -319,10 +313,11 @@ def command_acquire(args: argparse.Namespace) -> int:
             f"only {detail_fetched_count} of {listed_game_count} listed games have usable fetched details; "
             f"detail failures: {len(detail_failure_ids)}"
         )
-    if len(details) > 0 and len(details) - len(excluded_zero_placement_ids) < requested_maximum:
+    if len(details) > 0 and len(details) - len(excluded_short_game_ids) < requested_maximum:
         placement_warning = (
-            f"selected {len(details) - len(excluded_zero_placement_ids)} of up to "
-            f"{requested_maximum} listed games after coordinate-placement filtering"
+            f"selected {len(details) - len(excluded_short_game_ids)} of up to "
+            f"{requested_maximum} listed games after requiring at least "
+            f"{MINIMUM_ACTUAL_PLACEMENTS} actual placements"
         )
         coverage_warning = f"{coverage_warning}; {placement_warning}" if coverage_warning else placement_warning
     acquisition_report = {
@@ -334,8 +329,10 @@ def command_acquire(args: argparse.Namespace) -> int:
         "detailFailureGameCount": len(detail_failure_ids),
         "detailFailureGameIds": detail_failure_ids,
         "usableDetailCountForAccount": len(details),
-        "excludedZeroPlacementGameCount": len(excluded_zero_placement_ids),
-        "excludedZeroPlacementGameIds": excluded_zero_placement_ids,
+        **eligibility_contract(),
+        "eligibleGameCount": len(details) - len(excluded_short_game_ids),
+        "excludedShortGameCount": len(excluded_short_game_ids),
+        "excludedShortGameIds": excluded_short_game_ids,
         "requestedMaximumGameCount": requested_maximum,
         "coverageStatus": "complete" if not coverage_warning else "partial",
         "coverageWarning": coverage_warning,
@@ -352,10 +349,11 @@ def command_acquire(args: argparse.Namespace) -> int:
             f"account bundle contains no usable game details for {args.account!r}; "
             f"see {output / 'acquisition_report.json'}"
         )
-    eligible_details = [row for row in details if has_coordinate_placement(row)]
+    eligible_details = [row for row in details if is_investigation_eligible(row)]
     if not eligible_details:
         raise ValueError(
-            f"account bundle contains no games with coordinate placements for {args.account!r}; "
+            f"account bundle contains no games with at least {MINIMUM_ACTUAL_PLACEMENTS} "
+            f"actual placements (reaching ply {FIRST_ELIGIBLE_DECISION_PLY}) for {args.account!r}; "
             f"see {output / 'acquisition_report.json'}"
         )
     selected_details = sorted(
@@ -367,16 +365,17 @@ def command_acquire(args: argparse.Namespace) -> int:
     selected = dict(bundle)
     selected["schema"] = "oq-account-bundle-sentinel-recent-v1"
     selected["selection"] = {
-        "policy": "exclude zero-coordinate-placement games, then select most recent at most 30 by created then gameId",
+        "policy": "require at least 16 coordinate placements regardless of terminal status, then select most recent at most 30 by created then gameId",
         "maximumGameCount": 30,
+        **eligibility_contract(),
         "sourceGameCount": len(details),
         "listedGameCount": listed_game_count,
         "detailFetchedGameCount": detail_fetched_count,
         "detailFailureGameCount": len(detail_failure_ids),
         "detailFailureGameIds": detail_failure_ids,
         "eligibleGameCount": len(eligible_details),
-        "excludedZeroPlacementGameCount": len(excluded_zero_placement_ids),
-        "excludedZeroPlacementGameIds": excluded_zero_placement_ids,
+        "excludedShortGameCount": len(excluded_short_game_ids),
+        "excludedShortGameIds": excluded_short_game_ids,
         "gameIds": [str(row.get("id") or "") for row in selected_details],
         "coverageStatus": "complete" if not coverage_warning else "partial",
         "coverageWarning": coverage_warning,
@@ -394,6 +393,7 @@ def command_acquire(args: argparse.Namespace) -> int:
             "targetColor": target_color,
             "targetOldR": black.get("oldR") if target_color == "black" else white.get("oldR"),
             "opponentOldR": white.get("oldR") if target_color == "black" else black.get("oldR"),
+            "actualPlacementCount": actual_placement_count(detail),
         })
         metadata.append({
             "game_id": str(detail.get("id") or ""), "created": str(detail.get("created") or ""),
@@ -401,6 +401,10 @@ def command_acquire(args: argparse.Namespace) -> int:
         })
     sentinel.write_json(output / "game_catalog.json", {
         "schema": "player-investigation-game-catalog-v1", "account": args.account,
+        **eligibility_contract(),
+        "sourceGameCount": len(details),
+        "excludedShortGameCount": len(excluded_short_game_ids),
+        "excludedShortGameIds": excluded_short_game_ids,
         "gameCount": len(catalog), "games": catalog,
     })
     sentinel.write_csv(output / "games_metadata.csv", metadata)
@@ -411,8 +415,9 @@ def command_acquire(args: argparse.Namespace) -> int:
         "detailFetchedGameCount": detail_fetched_count,
         "detailFailureGameCount": len(detail_failure_ids),
         "detailFailureGameIds": detail_failure_ids,
-        "excludedZeroPlacementGameCount": len(excluded_zero_placement_ids),
-        "excludedZeroPlacementGameIds": excluded_zero_placement_ids,
+        **eligibility_contract(),
+        "excludedShortGameCount": len(excluded_short_game_ids),
+        "excludedShortGameIds": excluded_short_game_ids,
         "coverageStatus": "complete" if not coverage_warning else "partial",
         "coverageWarning": coverage_warning,
         "acquisitionReport": str((output / "acquisition_report.json").resolve()),

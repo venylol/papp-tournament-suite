@@ -2638,8 +2638,37 @@ html.ios-touch-checkin #step-checkin .autosave-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
+  align-items: stretch;
   padding-bottom: 2px;
+}
+
+.score-helper__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--md-sys-color-outline-variant) 42%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(
+    in srgb,
+    var(--md-sys-color-surface-container-low) 56%,
+    transparent
+  );
+}
+
+.score-helper__group--schedule {
+  flex: 1 1 100%;
+}
+
+.score-helper__group--oq,
+.score-helper__group--exports {
+  flex: 1 1 auto;
+}
+
+.score-helper__group--navigation {
+  flex: 0 1 auto;
 }
 
 .score-round-field {
@@ -3450,6 +3479,11 @@ html.no-color-mix .score-registration-actions {
 
   .score-helper__setup .score-round-field,
   .score-helper__setup .btn {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .score-helper__group {
     width: 100%;
     flex: 1 1 100%;
   }

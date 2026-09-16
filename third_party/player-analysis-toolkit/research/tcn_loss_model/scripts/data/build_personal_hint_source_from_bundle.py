@@ -16,11 +16,18 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+TOOLKIT_SRC = Path(__file__).resolve().parents[4] / "src"
+if str(TOOLKIT_SRC) not in sys.path:
+    sys.path.insert(0, str(TOOLKIT_SRC))
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from materialize_personal_oq_tcn_model_ready import game_summary, normalize_bundle
+from player_analysis_toolkit.investigation_eligibility import (
+    eligibility_contract,
+    validate_eligible_details,
+)
 from src.checkpoint import sha256_file
 
 INPUT_POLICY = "uniform-no-current-player-loss-history-v1"
@@ -68,6 +75,7 @@ def build_source(args: argparse.Namespace) -> dict[str, Any]:
     normalized, normalization = normalize_bundle(source, args.effective_time_limit_ms)
     reported = set(args.reported_game)
     details = normalized["details"]
+    validate_eligible_details(details, label="personal hint-source games")
     game_ids = {str(item["id"]) for item in details}
     if not reported <= game_ids:
         raise ValueError(f"reported games absent from bundle: {sorted(reported - game_ids)}")
@@ -177,6 +185,7 @@ def build_source(args: argparse.Namespace) -> dict[str, Any]:
         "effectiveTimeLimitMs": args.effective_time_limit_ms,
         "normalizationPolicy": normalization["policy"],
         "inputPolicy": INPUT_POLICY,
+        "investigationEligibility": eligibility_contract(),
         "shape": {
             "games": len(node_game_ids),
             "rows": rows,

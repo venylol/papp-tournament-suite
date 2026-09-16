@@ -534,9 +534,9 @@
     idPanel.classList.add("investigation-panel--past-games");
     gamesPanel.classList.remove("hidden");
     $("#investigation-games-title").textContent = `${player.name} · 选择举报局`;
-    $("#investigation-games-title").nextElementSibling.textContent = "从该账号的全部五分钟对局中勾选举报局，未勾选的对局作为对照局。";
+    $("#investigation-games-title").nextElementSibling.textContent = "仅显示至少完成 16 个坐标落子、已进入 ply 17 的五分钟对局；结束状态不影响准入。勾选为举报局，未勾选为对照局（至少保留 8 局）。";
     backToChoicesButton.textContent = "返回选手选择";
-    setGamesStatus("正在启动全部五分钟对局拉取…");
+    setGamesStatus("正在拉取五分钟对局并按 16 个实际落子标准筛选…");
     try {
       const payload = await requestJson("/api/player-investigation/start", {
         method: "POST",
@@ -580,9 +580,13 @@
           pendingAcquisitionFlow = "";
           workflowChoices.classList.toggle("hidden", games.length === 0 || enterManualFlow);
           manualPanel.classList.add("hidden");
+          const excludedShort = Number(payload.catalog.excludedShortGameCount) || 0;
+          const eligibilitySummary = excludedShort
+            ? `符合长度标准 ${payload.catalog.gameCount} 局，已排除不足 16 个实际落子的 ${excludedShort} 局`
+            : `符合长度标准 ${payload.catalog.gameCount} 局`;
           setGamesStatus(games.length
-            ? `已拉取全部 ${payload.catalog.gameCount} 局，${enterManualFlow ? "请勾选举报局。" : "请选择后续调查流程。"}`
-            : "没有找到可供调查的 5 分钟对局。", games.length === 0);
+            ? `${eligibilitySummary}；${enterManualFlow ? "请勾选举报局。" : "请选择后续调查流程。"}`
+            : "没有找到至少完成 16 个实际落子、已进入 ply 17 的 5 分钟对局。", games.length === 0);
           confirmButton.disabled = true;
           setStatus(games.length ? "选手已确认，对局已拉取。" : "选手已确认，但没有可调查对局。", games.length === 0);
           if (games.length && enterManualFlow) chooseManualFlow();
@@ -591,7 +595,7 @@
         if (payload.progress && payload.progress.status === "failed") {
           throw new Error(payload.error || "对局拉取失败");
         }
-        setStatus(progressMessage(payload, "正在拉取全部 5 分钟对局…"));
+        setStatus(progressMessage(payload, "正在拉取 5 分钟对局并筛选长度…"));
       } catch (error) {
         if (token !== investigationToken) return;
         setGamesStatus(String(error && error.message ? error.message : error), true);
@@ -677,7 +681,7 @@
     confirmButton.disabled = true;
     setGamesStatus("正在启动对局拉取…");
     gamesPanel.classList.remove("hidden");
-    setStatus("选手已确认，正在拉取全部 5 分钟对局…");
+    setStatus("选手已确认，正在拉取 5 分钟对局并按长度筛选…");
     try {
       const payload = await requestJson("/api/player-investigation/start", {
         method: "POST",
@@ -699,7 +703,11 @@
     const reportedGameIds = selectedGameIds();
     const controlCount = games.length - reportedGameIds.length;
     if (!reportedGameIds.length || controlCount <= 0) {
-      setGamesStatus("至少勾选一局举报局，并保留一局未勾选的对照局。", true);
+      setGamesStatus("至少勾选一局举报局，并保留至少 8 局未勾选的合格对照局。", true);
+      return;
+    }
+    if (controlCount < 8) {
+      setGamesStatus(`样本不足：至少需要 8 局未勾选的合格对照局，当前只有 ${controlCount} 局。`, true);
       return;
     }
     if (!window.confirm(analysisResourceConfirmation)) return;

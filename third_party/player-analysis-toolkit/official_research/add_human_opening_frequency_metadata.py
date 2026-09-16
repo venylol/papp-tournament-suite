@@ -13,8 +13,10 @@ METADATA_PATH = Path("oq_reversi_5min_elo2000_hints/position_context_metadata.cs
 FREQUENCY_LOOKUP_PATH = Path("oq_reversi_5min_elo2000_hints/human_opening_frequency_lookup.csv")
 FREQUENCY_SUMMARY_PATH = Path("oq_reversi_5min_elo2000_hints/human_opening_frequency_summary.json")
 DEFAULT_BOOK_PATH = Path(
-    r"C:\Users\MeroAF\Desktop\repo_practiceAI\Egaroucid-user-local"
-    r"\bin\resources\human_frequency_book\othelloquest_human_frequency_nodes_ply1_30_min5.runtime.json"
+    os.environ.get(
+        "PAPP_HUMAN_FREQUENCY_BOOK",
+        "othelloquest_human_frequency_nodes_ply1_30_min5.runtime.json",
+    )
 )
 
 

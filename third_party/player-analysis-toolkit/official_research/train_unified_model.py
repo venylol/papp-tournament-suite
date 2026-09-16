@@ -299,7 +299,8 @@ def add_agg(df: pd.DataFrame, prefix: str, score_cols, node_cols, depth_cols, bo
         df[f"{prefix}_depth_mean"] = depths.mean(axis=1)
 
     if book_cols:
-        books = df[book_cols].replace({True: 1, False: 0, "True": 1, "False": 0, "true": 1, "false": 0})
+        book_mapping = {True: 1, False: 0, "True": 1, "False": 0, "true": 1, "false": 0}
+        books = df[book_cols].apply(lambda column: column.map(book_mapping))
         books = books.apply(pd.to_numeric, errors="coerce")
         df[f"{prefix}_book_count"] = books.sum(axis=1)
 
