@@ -38,6 +38,7 @@ class InvestigationBatchManager {
   constructor(options) {
     this.root = path.resolve(options.root);
     this.runPlayer = options.runPlayer;
+    this.stopPlayer = options.stopPlayer;
     this.now = options.now || (() => new Date());
     this.jobs = new Map();
     this.sequence = 0;
@@ -82,7 +83,7 @@ class InvestigationBatchManager {
 
   start(input) {
     if (typeof this.runPlayer !== "function") throw new Error("批量哨兵运行器不可用");
-    if ([...this.jobs.values()].some((job) => job.status === "running")) {
+    if ([...this.jobs.values()].some((job) => ["running", "terminating"].includes(job.status))) {
       throw new Error("已有多人哨兵分析正在运行，请等待完成");
     }
     const value = input && typeof input === "object" ? input : {};
@@ -111,6 +112,8 @@ class InvestigationBatchManager {
       currentIndex: 0,
       currentPlayer: null,
       results: [],
+      terminationRequested: false,
+      activeRunId: "",
     };
     this.jobs.set(batchId, job);
     this.write(job);
@@ -120,12 +123,14 @@ class InvestigationBatchManager {
 
   async run(job) {
     for (let index = 0; index < job.players.length; index += 1) {
+      if (job.terminationRequested) break;
       const player = job.players[index];
       job.currentIndex = index + 1;
       job.currentPlayer = player;
       this.write(job);
       try {
         const result = await this.runPlayer(player, job);
+        if (job.terminationRequested) break;
         job.results.push({
           ...player,
           status: "completed",
@@ -133,6 +138,7 @@ class InvestigationBatchManager {
           summary: result && result.summary ? result.summary : null,
         });
       } catch (error) {
+        if (job.terminationRequested) break;
         job.results.push({
           ...player,
           status: "failed",
@@ -143,10 +149,29 @@ class InvestigationBatchManager {
       this.write(job);
     }
     job.currentPlayer = null;
-    job.status = "completed";
+    job.status = job.terminationRequested ? "terminated" : "completed";
     job.completedAt = this.now().toISOString();
     this.write(job);
     this.write(job, true);
+  }
+
+  async terminate(batchId) {
+    const id = safeBatchId(batchId);
+    const job = this.jobs.get(id);
+    if (!job || ["completed", "terminated"].includes(job.status)) return this.status(id);
+    if (typeof this.stopPlayer !== "function") throw new Error("批量哨兵终止接口不可用");
+    job.terminationRequested = true;
+    job.status = "terminating";
+    this.write(job);
+    try {
+      await this.stopPlayer(job);
+    } catch (error) {
+      job.terminationRequested = false;
+      job.status = "running";
+      this.write(job);
+      throw error;
+    }
+    return this.status(id);
   }
 
   status(batchId) {

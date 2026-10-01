@@ -955,7 +955,7 @@ def run_sentinel_scan_stages(run: Run) -> dict[str, Any]:
         "--replicates", str(parameters["pseudoPlayerReplicates"]),
         "--bootstrap", str(parameters["sentinelBootstrapReplicates"]),
         "--seed", str(parameters["sentinelSeed"]),
-        "--workers", str(parameters.get("pseudoScanWorkers", 1)),
+        "--workers", str(parameters.get("pseudoScanWorkers", 0)),
     ]
     run.run_stage("sentinel_pseudo_scan", scan_command, [replicate_csv, pseudo_summary, scan_json])
 
@@ -1677,7 +1677,7 @@ def build_parser() -> argparse.ArgumentParser:
     sentinel_start.add_argument("--model-seed", type=int, default=20260809)
     sentinel_start.add_argument("--sentinel-seed", type=int, default=20260814)
     sentinel_start.add_argument("--pseudo-replicates", type=int, default=10_000)
-    sentinel_start.add_argument("--pseudo-workers", type=int, default=max(1, min(4, (os.cpu_count() or 2) // 2)))
+    sentinel_start.add_argument("--pseudo-workers", type=int, default=0, help="0: automatic physical-core/50%%-RAM limit")
     sentinel_start.add_argument("--sentinel-bootstrap", type=int, default=10_000)
     sentinel_start.add_argument("--device", default="cuda:0")
     sentinel_start.add_argument("--level22-threads", type=int, default=16)

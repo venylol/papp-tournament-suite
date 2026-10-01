@@ -22,6 +22,7 @@
   const resultList = $("#batch-result-list");
   const error = $("#batch-error");
   let polling = true;
+  let leaving = false;
 
   if (fromHistory) {
     brandLink.href = "./history.html";
@@ -44,6 +45,13 @@
   function format(value, digits = 0) {
     const result = number(value);
     return result === null ? "—" : result.toFixed(digits).replace(/\.0+$/u, "");
+  }
+
+  async function requestJson(url, options = {}) {
+    const response = await fetch(url, { cache: "no-store", ...options });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.detail || payload.error || "本地服务返回失败");
+    return payload;
   }
 
   async function requestStatus() {
@@ -119,6 +127,12 @@
     const percent = total ? Math.round(processed / total * 100) : 0;
     const active = payload.currentPlayer && typeof payload.currentPlayer === "object" ? payload.currentPlayer : null;
     const state = text(payload.status).toLowerCase() || "running";
+    if (["terminating", "terminated"].includes(state)) {
+      statusBadge.textContent = state === "terminated" ? "已终止" : "终止中";
+      reportStatus.textContent = statusBadge.textContent;
+      message.textContent = state === "terminated" ? "多人任务已终止，后续选手不再分析。" : "正在终止多人任务…";
+      return state;
+    }
     tournament.textContent = text(payload.competitionName) || text(payload.tournamentFile) || "—";
     id.textContent = batchId || "—";
     currentPlayer.textContent = active ? `第 ${active.rank} 名 · ${active.name}（${active.account}）` : "—";
@@ -139,6 +153,38 @@
     return state;
   }
 
+  async function returnToParent(event) {
+    event.preventDefault();
+    if (leaving) return;
+    const destination = event.currentTarget.href;
+    if (!batchId) { window.location.assign(destination); return; }
+    leaving = true;
+    try {
+      let payload = await requestJson(`/api/player-investigation/batch-status?batchId=${encodeURIComponent(batchId)}`);
+      if (["running", "terminating"].includes(payload.status)) {
+        if (!window.confirm("是否终止当前的任务？确认后将终止任务并返回上一级。")) return;
+        payload = await requestJson("/api/player-investigation/batch-terminate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ batchId }),
+        });
+        while (["running", "terminating"].includes(payload.status)) {
+          if (!(payload.status === "terminating")) throw new Error(payload.error || "终止任务失败，请重试。");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          payload = await requestJson(`/api/player-investigation/batch-status?batchId=${encodeURIComponent(batchId)}`);
+        }
+      }
+      polling = false;
+      window.location.assign(destination);
+    } catch (failure) {
+      error.textContent = String(failure && failure.message ? failure.message : failure);
+    } finally {
+      leaving = false;
+    }
+  }
+
+  [brandLink, headerBack, footerBack].forEach((link) => link.addEventListener("click", returnToParent));
+
   async function watch() {
     if (!batchId) {
       error.textContent = "缺少多人哨兵任务 ID，请从往期比赛调查入口重新开始。";
@@ -148,7 +194,7 @@
       try {
         const state = render(await requestStatus());
         error.textContent = "";
-        if (state === "completed") return;
+        if (["completed", "terminated"].includes(state)) return;
       } catch (failure) {
         error.textContent = text(failure && failure.message) || "读取任务状态失败";
       }

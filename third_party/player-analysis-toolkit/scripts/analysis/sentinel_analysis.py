@@ -452,7 +452,7 @@ def command_scan(args: argparse.Namespace) -> int:
     reference = load_jsonl(args.reference_records.resolve())
     scan, replicates, summary = sentinel.run_pseudo_scan(
         score_payload, reference, replicates=args.replicates,
-        bootstrap=args.bootstrap, seed=args.seed, workers=args.workers,
+        bootstrap=args.bootstrap, seed=args.seed, workers=args.workers or None,
     )
     sentinel.write_csv(args.replicate_output, replicates)
     sentinel.write_json(args.summary_output, summary)
@@ -530,7 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--replicates", type=int, default=sentinel.DEFAULT_REPLICATES)
     scan.add_argument("--bootstrap", type=int, default=sentinel.DEFAULT_BOOTSTRAP)
     scan.add_argument("--seed", type=int, default=sentinel.DEFAULT_SEED)
-    scan.add_argument("--workers", type=int, default=1)
+    scan.add_argument("--workers", type=int, default=0, help="0: physical cores and 50%% RAM budget; positive: upper limit")
     scan.set_defaults(handler=command_scan)
 
     freeze = commands.add_parser("freeze")

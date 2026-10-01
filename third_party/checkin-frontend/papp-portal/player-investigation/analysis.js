@@ -93,6 +93,7 @@
 
   let stopping = false;
   let polling = true;
+  let leaving = false;
 
   if (fromHistory) {
     brandLink.href = "./history.html";
@@ -659,6 +660,38 @@
       errorMessage.textContent = String(error && error.message ? error.message : error);
     }
   }
+
+  async function returnToParent(event) {
+    event.preventDefault();
+    if (leaving) return;
+    const destination = event.currentTarget.href;
+    if (!runId) { window.location.assign(destination); return; }
+    leaving = true;
+    try {
+      let payload = await requestJson(`/api/player-investigation/status?runId=${encodeURIComponent(runId)}`);
+      if (payload.running) {
+        if (!window.confirm("是否终止当前的任务？确认后将终止任务并返回上一级。")) return;
+        payload = await requestJson("/api/player-investigation/terminate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ runId }),
+        });
+        while (payload.running) {
+          if (!(payload.terminationRequested)) throw new Error(payload.error || "终止任务失败，请重试。");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          payload = await requestJson(`/api/player-investigation/status?runId=${encodeURIComponent(runId)}`);
+        }
+      }
+      polling = false;
+      window.location.assign(destination);
+    } catch (failure) {
+      errorMessage.textContent = String(failure && failure.message ? failure.message : failure);
+    } finally {
+      leaving = false;
+    }
+  }
+
+  [brandLink, headerBack, footerBack].forEach((link) => link.addEventListener("click", returnToParent));
 
   async function watch() {
     if (!runId) {

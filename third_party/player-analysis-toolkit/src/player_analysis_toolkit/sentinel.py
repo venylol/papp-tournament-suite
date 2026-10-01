@@ -7,10 +7,13 @@ import json
 import math
 import random
 import statistics
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from .sentinel_resources import resolve_workers
 
 from .analysis_core import (
     account_key,
@@ -724,6 +727,84 @@ def _bootstrap_fixed_candidate(
     }
 
 
+_PSEUDO_MATCH_CONTEXT: tuple[Any, ...] | None = None
+
+
+def _initialize_pseudo_match_worker(
+    slots: list[dict[str, Any]], reference: list[dict[str, Any]], elo_bounds: tuple[int, int, int],
+) -> None:
+    global _PSEUDO_MATCH_CONTEXT
+    configure_elo_bounds(*elo_bounds)
+    _PSEUDO_MATCH_CONTEXT = (
+        slots, reference_index(reference, scope_aware=True),
+        reference_index(reference, scope_aware=False),
+    )
+
+
+def _match_pseudo_batch(tasks: list[tuple[int, str]]) -> list[tuple[int, str, float, float]]:
+    if _PSEUDO_MATCH_CONTEXT is None:
+        raise RuntimeError("pseudo matching worker has not been initialized")
+    slots, ge4_index, wld_index = _PSEUDO_MATCH_CONTEXT
+    results = []
+    for slot_index, game_id in tasks:
+        slot = slots[slot_index]
+        loo = match_reference(slot, ge4_index, excluded_game_ids={game_id})
+        if not loo["calibratable"]:
+            raise ValueError(f"leave-one-game matching failed for slot {slot['gameId']} and reference game {game_id}")
+        loo_wld = match_reference(
+            slot, wld_index, metric="engine_wld_loss_total_from_ply39",
+            excluded_game_ids={game_id}, scope_aware=False,
+        )
+        results.append((slot_index, game_id, float(loo["expected"]),
+                        float(loo_wld["expected"]) if loo_wld["calibratable"] else math.nan))
+    return results
+
+
+def sample_pseudo_rows_parallel(
+    slot_matches: list[tuple[dict[str, Any], list[tuple[dict[str, Any], float]]]],
+    reference: list[dict[str, Any]], rng: random.Random, replicates: int, workers: int,
+) -> list[list[dict[str, Any]]]:
+    """Keep MT19937 draws in the parent; match each unique slot/game in workers."""
+    samples = []
+    unique_tasks: dict[tuple[int, str], None] = {}
+    for _ in range(replicates):
+        sampled = []
+        for slot_index, (_, pool) in enumerate(slot_matches):
+            record = _draw_weighted(rng, pool)
+            sampled.append(record)
+            unique_tasks[(slot_index, str(record["gameId"]))] = None
+        samples.append(sampled)
+    tasks = list(unique_tasks)
+    batches = [tasks[index:index + 64] for index in range(0, len(tasks), 64)]
+    expected = {}
+    with ProcessPoolExecutor(
+        max_workers=min(workers, len(tasks)), initializer=_initialize_pseudo_match_worker,
+        initargs=([slot for slot, _ in slot_matches], reference, (MIN_ELO, MAX_ELO, ELO_WIDTH)),
+    ) as executor:
+        for batch in executor.map(_match_pseudo_batch, batches):
+            for slot_index, game_id, ge4, wld in batch:
+                expected[(slot_index, game_id)] = (ge4, wld)
+    pseudo_rows = []
+    for sampled in samples:
+        rows = []
+        for slot_index, record in enumerate(sampled):
+            game_id = str(record["gameId"])
+            ge4, wld = expected[(slot_index, game_id)]
+            rows.append({
+                "gameId": game_id,
+                "sourceTargetPlayerId": record["targetPlayerId"],
+                "sourceTargetColor": record["targetColor"],
+                "externalStrengthResidual": ge4 - float(record["loss_ge4_rate"]),
+                "engine_wld_loss_total_from_ply39": float(record["engine_wld_loss_total_from_ply39"]),
+                "externalWldStrengthResidual": (
+                    wld - float(record["engine_wld_loss_total_from_ply39"])
+                    if math.isfinite(wld) else None
+                ),
+            })
+        pseudo_rows.append(rows)
+    return pseudo_rows
+
+
 def run_pseudo_scan(
     score_payload: dict[str, Any],
     reference_records: list[dict[str, Any]],
@@ -731,10 +812,10 @@ def run_pseudo_scan(
     replicates: int = DEFAULT_REPLICATES,
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = DEFAULT_SEED,
-    workers: int = 1,
+    workers: int | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    if replicates < 1 or bootstrap < 1:
-        raise ValueError("replicate and bootstrap counts must be positive")
+    if replicates < 1 or bootstrap < 1 or (workers is not None and workers < 1):
+        raise ValueError("replicate, bootstrap and worker counts must be positive")
     actual_rows = [row for row in score_payload["scores"] if row.get("calibratable")]
     if not actual_rows:
         replicate_output = [{
@@ -778,40 +859,46 @@ def run_pseudo_scan(
             raise ValueError(f"previously calibratable game {row['gameId']} is no longer calibratable")
         slot_matches.append((row, match["records"]))
 
+    automatic_workers = workers is None
+    workers = resolve_workers(workers)
+    if automatic_workers:
+        print(f"[sentinel] automatic scan workers={workers}; memory budget=50% of installed physical RAM", file=sys.stderr)
     rng = random.Random(seed)
-    leave_one_cache: dict[tuple[int, str, str], float] = {}
-    pseudo_rows: list[list[dict[str, Any]]] = []
-    pseudo_effects: list[dict[str, Any]] = []
-    for _ in range(replicates):
-        sampled_rows = []
-        for slot_index, (slot, pool) in enumerate(slot_matches):
-            sampled = _draw_weighted(rng, pool)
-            game_id = str(sampled["gameId"])
-            cache_key = (slot_index, game_id, "ge4")
-            if cache_key not in leave_one_cache:
-                loo = match_reference(slot, ge4_index, excluded_game_ids={game_id})
-                if not loo["calibratable"]:
-                    raise ValueError(f"leave-one-game matching failed for slot {slot['gameId']} and reference game {game_id}")
-                leave_one_cache[cache_key] = float(loo["expected"])
-            wld_key = (slot_index, game_id, "wld")
-            if wld_key not in leave_one_cache:
-                loo_wld = match_reference(
-                    slot, wld_index, metric="engine_wld_loss_total_from_ply39",
-                    excluded_game_ids={game_id}, scope_aware=False,
-                )
-                leave_one_cache[wld_key] = float(loo_wld["expected"]) if loo_wld["calibratable"] else math.nan
-            sampled_rows.append({
-                "gameId": game_id,
-                "sourceTargetPlayerId": sampled["targetPlayerId"],
-                "sourceTargetColor": sampled["targetColor"],
-                "externalStrengthResidual": leave_one_cache[cache_key] - float(sampled["loss_ge4_rate"]),
-                "engine_wld_loss_total_from_ply39": float(sampled["engine_wld_loss_total_from_ply39"]),
-                "externalWldStrengthResidual": (
-                    leave_one_cache[wld_key] - float(sampled["engine_wld_loss_total_from_ply39"])
-                    if math.isfinite(leave_one_cache[wld_key]) else None
-                ),
-            })
-        pseudo_rows.append(sampled_rows)
+    if workers > 1:
+        pseudo_rows = sample_pseudo_rows_parallel(slot_matches, reference, rng, replicates, workers)
+    else:
+        leave_one_cache: dict[tuple[int, str, str], float] = {}
+        pseudo_rows: list[list[dict[str, Any]]] = []
+        for _ in range(replicates):
+            sampled_rows = []
+            for slot_index, (slot, pool) in enumerate(slot_matches):
+                sampled = _draw_weighted(rng, pool)
+                game_id = str(sampled["gameId"])
+                cache_key = (slot_index, game_id, "ge4")
+                if cache_key not in leave_one_cache:
+                    loo = match_reference(slot, ge4_index, excluded_game_ids={game_id})
+                    if not loo["calibratable"]:
+                        raise ValueError(f"leave-one-game matching failed for slot {slot['gameId']} and reference game {game_id}")
+                    leave_one_cache[cache_key] = float(loo["expected"])
+                wld_key = (slot_index, game_id, "wld")
+                if wld_key not in leave_one_cache:
+                    loo_wld = match_reference(
+                        slot, wld_index, metric="engine_wld_loss_total_from_ply39",
+                        excluded_game_ids={game_id}, scope_aware=False,
+                    )
+                    leave_one_cache[wld_key] = float(loo_wld["expected"]) if loo_wld["calibratable"] else math.nan
+                sampled_rows.append({
+                    "gameId": game_id,
+                    "sourceTargetPlayerId": sampled["targetPlayerId"],
+                    "sourceTargetColor": sampled["targetColor"],
+                    "externalStrengthResidual": leave_one_cache[cache_key] - float(sampled["loss_ge4_rate"]),
+                    "engine_wld_loss_total_from_ply39": float(sampled["engine_wld_loss_total_from_ply39"]),
+                    "externalWldStrengthResidual": (
+                        leave_one_cache[wld_key] - float(sampled["engine_wld_loss_total_from_ply39"])
+                        if math.isfinite(leave_one_cache[wld_key]) else None
+                    ),
+                })
+            pseudo_rows.append(sampled_rows)
     pseudo_effects = scan_effects_many(pseudo_rows, workers)
 
     actual_effects = scan_effects(actual_rows)

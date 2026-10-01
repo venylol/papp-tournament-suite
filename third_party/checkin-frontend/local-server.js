@@ -76,7 +76,7 @@ const PAPP_TOURNAMENT_WORKFILES_ENV = "PAPP_TOURNAMENT_WORKFILES_DIR";
 const HOST = process.env.PAPP_HOST || "127.0.0.1";
 const PORT = Number(process.env.PAPP_PORT || 4175);
 const SERVICE = "papp-local-frontend";
-const SERVICE_VERSION = "papp-local-frontend.37";
+const SERVICE_VERSION = "papp-local-frontend.38";
 const PLAYER_INVESTIGATION_ELIGIBILITY_POLICY = "at-least-16-coordinate-placements-v1";
 const PLAYER_INVESTIGATION_MINIMUM_ACTUAL_PLACEMENTS = 16;
 const PLAYER_INVESTIGATION_FIRST_ELIGIBLE_DECISION_PLY = 17;
@@ -1369,9 +1369,8 @@ function startPlayerSentinelInvestigation(payload) {
     "--reference-config", PLAYER_SENTINEL_REFERENCE_CONFIG,
     "--elo-reference-config", PLAYER_SENTINEL_ELO_REFERENCE_CONFIG,
     "--bundle", sourceBundle,
-    // Keep the expensive pseudo scan parallel by default. Four workers cap
-    // memory use while still using multiple cores on the bundled runtime.
-    "--pseudo-workers", String(Math.max(1, Math.min(4, Math.floor((os.cpus()?.length || 2) / 2)))),
+    // Let Python size scan workers using physical cores and 50% of total RAM.
+    "--pseudo-workers", "0",
   ];
   const job = startPlayerInvestigationProcess(runId, runDir, "sentinel", args);
   job.account = account;
@@ -1451,17 +1450,19 @@ function waitForPlayerInvestigation(runId) {
   });
 }
 
-async function runBatchSentinelPlayer(player) {
+async function runBatchSentinelPlayer(player, batchJob) {
   let runId = "";
   try {
     const acquisition = startPlayerInvestigation({ account: player.account });
     runId = acquisition.runId;
+    batchJob.activeRunId = runId;
     await waitForPlayerInvestigation(runId);
     const acquired = playerInvestigationStatus(runId, false);
     if (acquired.exitCode !== 0 || acquired.progress?.stages?.fetch_games?.status !== "completed") {
       throw new Error(acquired.error || "全部五分钟对局拉取失败");
     }
 
+    if (batchJob.terminationRequested) throw new Error("任务已终止");
     const started = startPlayerSentinelInvestigation({ runId });
     runId = started.runId;
     await waitForPlayerInvestigation(runId);
@@ -1479,6 +1480,15 @@ async function runBatchSentinelPlayer(player) {
 const investigationBatchManager = new InvestigationBatchManager({
   root: PLAYER_INVESTIGATION_BATCH_ROOT,
   runPlayer: runBatchSentinelPlayer,
+  stopPlayer: async (job) => {
+    if (!job.activeRunId) return;
+    let status = terminatePlayerInvestigation({ runId: job.activeRunId });
+    while (status.running) {
+      if (!status.terminationRequested) throw new Error(status.error || "终止调查任务失败");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      status = playerInvestigationStatus(job.activeRunId, false);
+    }
+  },
 });
 
 function startBatchSentinelInvestigation(payload) {
@@ -3783,6 +3793,17 @@ async function handleApi(req, res, pathname) {
       sendJson(res, 200, startBatchSentinelInvestigation(payload));
     } catch (error) {
       sendError(res, 400, "启动多人哨兵分析失败", error.message);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/player-investigation/batch-terminate" && req.method === "POST") {
+    try {
+      const raw = await readBody(req);
+      const payload = raw.trim() ? JSON.parse(raw) : {};
+      sendJson(res, 200, await investigationBatchManager.terminate(payload.batchId));
+    } catch (error) {
+      sendError(res, 400, "终止多人哨兵分析失败", error.message);
     }
     return true;
   }
