@@ -42,11 +42,11 @@
   function fitText(ctx, value, maxWidth) {
     var text = String(value || "");
     if (!text || !maxWidth || ctx.measureText(text).width <= maxWidth) return text;
-    var out = text;
-    while (out.length > 1 && ctx.measureText(out + "…").width > maxWidth) {
-      out = out.slice(0, -1);
+    var out = Array.from(text);
+    while (out.length > 1 && ctx.measureText(out.join("") + "…").width > maxWidth) {
+      out.pop();
     }
-    return out + "…";
+    return out.join("") + "…";
   }
 
   function canvasScale(width, height) {
@@ -115,7 +115,7 @@
     if (!ctx) throw new Error("无法获取 PNG Canvas 2D 上下文");
     ctx.scale(scale, scale);
 
-    var fontFamily = "'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+    var fontFamily = "'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI Emoji', sans-serif";
     ctx.fillStyle = COLORS.page;
     ctx.fillRect(0, 0, width, height);
     ctx.fillStyle = COLORS.header;
@@ -130,7 +130,7 @@
       48,
       width - marginX * 2,
       "left",
-      "800 30px " + fontFamily,
+      "700 30px " + fontFamily,
       COLORS.white,
     );
     drawText(
@@ -140,7 +140,7 @@
       91,
       width - marginX * 2,
       "left",
-      "750 22px " + fontFamily,
+      "600 22px " + fontFamily,
       COLORS.white,
     );
     drawText(
@@ -163,11 +163,11 @@
       drawText(
         ctx,
         column.label,
-        columnX + (column.align === "left" ? 14 : 0),
+        columnX + (column.align === "center" ? 0 : 14),
         tableY + tableHeaderHeight / 2,
-        column.width - (column.align === "left" ? 28 : 16),
+        column.width - (column.align === "center" ? 0 : 28),
         column.align,
-        "750 15px " + fontFamily,
+        "600 15px " + fontFamily,
         COLORS.muted,
       );
       columnX += column.width;
@@ -197,7 +197,7 @@
         centerY,
         columns[0].width,
         "center",
-        "800 19px " + fontFamily,
+        "700 19px " + fontFamily,
         rankColor,
       );
       x += columns[0].width;
@@ -212,7 +212,7 @@
           centerY - 9,
           columns[1].width - 28,
           "left",
-          "750 17px " + fontFamily,
+          "600 17px " + fontFamily,
           COLORS.text,
         );
         drawText(
@@ -233,7 +233,7 @@
           centerY,
           columns[1].width - 28,
           "left",
-          "750 17px " + fontFamily,
+          "600 17px " + fontFamily,
           COLORS.text,
         );
       }
@@ -244,11 +244,11 @@
         drawText(
           ctx,
           formatMetric(row[key]),
-          x + 8,
+          x + 14,
           centerY,
-          column.width - 22,
+          column.width - 28,
           "right",
-          "650 16px " + fontFamily,
+          "500 16px " + fontFamily,
           COLORS.text,
         );
         x += column.width;
@@ -262,7 +262,7 @@
           centerY,
           columns[columns.length - 1].width,
           "center",
-          "650 16px " + fontFamily,
+          "500 16px " + fontFamily,
           COLORS.text,
         );
       }
@@ -282,7 +282,7 @@
       height - footerHeight / 2,
       tableWidth,
       "left",
-      "550 14px " + fontFamily,
+      "500 14px " + fontFamily,
       COLORS.muted,
     );
     return canvas;

@@ -15254,11 +15254,11 @@
     if (!raw) return "";
     if (ctx.measureText(raw).width <= maxWidth) return raw;
 
-    let out = raw;
-    while (out.length > 1 && ctx.measureText(out + "…").width > maxWidth) {
-      out = out.slice(0, -1);
+    let out = Array.from(raw);
+    while (out.length > 1 && ctx.measureText(out.join("") + "…").width > maxWidth) {
+      out.pop();
     }
-    return out + "…";
+    return out.join("") + "…";
   }
 
   function buildExportCanvasFromData(viewPlayers, settings, options) {
@@ -15273,10 +15273,10 @@
     const width = safeIOS ? 1000 : 1280;
     const marginX = safeIOS ? 28 : 40;
     const marginY = safeIOS ? 24 : 30;
-    const titleH = safeIOS ? 44 : 48;
+    const titleH = safeIOS ? 64 : 68;
     const statsH = safeIOS ? 28 : 28;
     const headerH = safeIOS ? 40 : 44;
-    const rowH = safeIOS ? 36 : 40;
+    const rowH = safeIOS ? 58 : 64;
     const noteH = safeIOS ? 56 : 34;
     const bottomPad = safeIOS ? 22 : 26;
     const maxCanvasHeight = safeIOS ? 3600 : 32760;
@@ -15306,7 +15306,7 @@
     if (!ctx) throw new Error("无法获取 Canvas 2D 上下文");
 
     const fontFamily =
-      '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif';
+      '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI Emoji", sans-serif';
 
     // Background
     ctx.fillStyle = "#FFFFFF";
@@ -15317,7 +15317,7 @@
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#1F2937";
     ctx.font = `${safeIOS ? "700 28px" : "700 30px"} ${fontFamily}`;
-    ctx.fillText(title, width / 2, marginY + 20);
+    ctx.fillText(fitTextToWidth(ctx, title, width - marginX * 2), width / 2, marginY + 20);
 
     // Stats
     ctx.textAlign = "left";
@@ -15377,7 +15377,8 @@
       if (s.withPlatform && p.platform) info.push(p.platform.toUpperCase());
       if (p.isNew) info.push("新人");
 
-      if (info.length) nameRaw = `${nameRaw}（${info.join(" · ")}）`;
+
+      ctx.font = `${safeIOS ? "600 16px" : "600 18px"} ${fontFamily}`;
       const name = fitTextToWidth(ctx, nameRaw, colNameW - 24);
 
       ctx.fillStyle = "#111827";
@@ -15386,7 +15387,13 @@
 
       ctx.textAlign = "left";
       ctx.fillStyle = "#111827";
-      ctx.fillText(name, tableX + colIndexW + 12, y + rowH / 2);
+      ctx.fillText(name, tableX + colIndexW + 12, y + rowH / 2 - (info.length ? 11 : 0));
+      if (info.length) {
+        ctx.font = `${safeIOS ? "400 13px" : "400 14px"} ${fontFamily}`;
+        ctx.fillStyle = "#6B7280";
+        ctx.fillText(fitTextToWidth(ctx, info.join(" · "), colNameW - 24), tableX + colIndexW + 12, y + rowH / 2 + 13);
+      }
+      ctx.font = `${safeIOS ? "500 16px" : "500 17px"} ${fontFamily}`;
 
       ctx.fillStyle = p.checkedIn ? "#059669" : "#6B7280";
       const statusText = p.checkedIn ? "已签到" : "等待中";
@@ -15447,10 +15454,10 @@
     const width = safeIOS ? 1000 : 1280;
     const marginX = safeIOS ? 28 : 40;
     const marginY = safeIOS ? 24 : 30;
-    const titleH = safeIOS ? 44 : 48;
+    const titleH = safeIOS ? 64 : 68;
     const statsH = safeIOS ? 28 : 28;
     const headerH = safeIOS ? 40 : 44;
-    const rowH = safeIOS ? 38 : 42;
+    const rowH = safeIOS ? 58 : 64;
     const noteH = safeIOS ? 56 : 34;
     const bottomPad = safeIOS ? 22 : 26;
     const maxCanvasHeight = safeIOS ? 3600 : 32760;
@@ -15477,7 +15484,7 @@
     if (!ctx) throw new Error("无法获取 Canvas 2D 上下文");
 
     const fontFamily =
-      '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif';
+      '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI Emoji", sans-serif';
 
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -15545,9 +15552,6 @@
       const account = normalizeWhitespace(row && row.oqAccount);
       const status = mappingStatusLabel(row);
       const rating = mappingOqRatingLabel(row && row.oqCheck);
-      const oqText = account
-        ? `${account} · ${status.text}${rating ? ` · ${rating.text}` : ""}`
-        : "未填写";
 
       ctx.fillStyle = "#111827";
       ctx.textAlign = "center";
@@ -15569,10 +15573,16 @@
           : "#111827"
         : "#B45309";
       ctx.fillText(
-        fitTextToWidth(ctx, oqText, colOqW - 24),
+        fitTextToWidth(ctx, account || "未填写", colOqW - 24),
         tableX + colIndexW + colWechatW + colRegistrationW + 12,
-        y + rowH / 2,
+        y + rowH / 2 - (account ? 11 : 0),
       );
+      if (account) {
+        ctx.font = `${safeIOS ? "400 13px" : "400 14px"} ${fontFamily}`;
+        ctx.fillStyle = "#6B7280";
+        ctx.fillText(fitTextToWidth(ctx, `${status.text}${rating ? ` · ${rating.text}` : ""}`, colOqW - 24), tableX + colIndexW + colWechatW + colRegistrationW + 12, y + rowH / 2 + 13);
+        ctx.font = `${safeIOS ? "500 16px" : "500 17px"} ${fontFamily}`;
+      }
     });
 
     const rowsHeight = headerH + visibleRows.length * rowH;
@@ -16329,33 +16339,12 @@
   }
 
   async function buildPNGCanvasForExport(settings, viewPlayers) {
-    const node = exportContainer;
-    if (!node) throw new Error("导出预览未加载");
-
-    if (isIOS()) {
-      return {
-        canvas: buildExportCanvasFromData(viewPlayers, settings, {
-          safeIOS: true,
-        }),
-        compatMode: true,
-        iosSafeMode: true,
-      };
-    }
-
-    try {
-      return {
-        canvas: await captureExportPreviewCanvas(node),
-        compatMode: false,
-        iosSafeMode: false,
-      };
-    } catch (e) {
-      console.warn("html2canvas 导出失败，尝试兼容模式：", e);
-      return {
-        canvas: buildExportCanvasFromData(viewPlayers, settings),
-        compatMode: true,
-        iosSafeMode: false,
-      };
-    }
+    const safeIOS = isIOS();
+    return {
+      canvas: buildExportCanvasFromData(viewPlayers, settings, { safeIOS }),
+      compatMode: false,
+      iosSafeMode: safeIOS,
+    };
   }
 
   function prepareExportPreview() {
