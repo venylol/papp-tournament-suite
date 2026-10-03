@@ -48,7 +48,7 @@ test("history page offers single and batch reports through existing report views
   assert.match(batchNavigation[1], /footerBack\.href = batchOverviewHref/);
   assert.match(batchNavigation[1], /footerBack\.textContent = "返回批量分析概览"/);
   assert.match(analysisHtml, /rating-presentation\.js\?v=papp-portal\.1/);
-  assert.match(analysisHtml, /analysis\.js\?v=papp-portal\.10/);
+  assert.match(analysisHtml, /analysis\.js\?v=papp-portal\.13/);
   assert.match(batchHtml, /rating-presentation\.js\?v=papp-portal\.1/);
   assert.match(batchHtml, /batch-analysis\.js\?v=papp-portal\.4/);
 });

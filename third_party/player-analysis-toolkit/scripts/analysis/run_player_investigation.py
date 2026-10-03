@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Resumable end-to-end Othello Quest player investigation orchestrator.
 
 The main Agent selects the reported and control groups. After audited Level22

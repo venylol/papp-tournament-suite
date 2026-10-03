@@ -477,6 +477,41 @@
     }
   }
 
+  function renderExactCombination(section, results) {
+    const combinations = Array.isArray(results) ? results : [];
+    const note = "统计量为每局平均子损的局等权均值。对局集包含举报局与相应对照局；每个组合的局数与举报组相同。下尾计入平均子损更低或相等的组合，上尾计入更高或相等的组合；双尾为两倍较小尾部比例，最大为 100%。这不是 Bootstrap 区间或作弊概率。";
+    const combinationSection = appendReportSection("精确组合位置", note, section);
+    if (!combinations.length) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "investigation-analysis__report-note";
+      unavailable.textContent = "此报告未提供组合位置结果。";
+      combinationSection.append(unavailable);
+      return;
+    }
+    const rate = (value) => value === null || value === undefined
+      ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
+    const rows = combinations.map((result) => {
+      const computed = result.status === "computed";
+      const sampled = result.status === "monte_carlo";
+      const available = computed || sampled;
+      const counts = `举报 ${formatMetricNumber(result.reportedGameCount, 0)} / 对照 ${formatMetricNumber(result.controlGameCount, 0)} 局`;
+      const method = computed ? "全部枚举（精确）" : sampled ? "抽样估计（非精确）" : "未提供结果";
+      return [
+        `${result.label}（${counts}）`,
+        formatMetricNumber(result.reportedMeanLoss, 4),
+        method,
+        formatMetricNumber(result.combinationCount, 0),
+        formatMetricNumber(result.evaluatedCombinationCount, 0),
+        computed ? formatMetricNumber(result.ascendingRank, 0) : "—",
+        available ? rate(result.lowerTailPosition) : "—",
+        available ? rate(result.upperTailPosition) : "—",
+        available ? rate(result.twoTailPosition) : "—",
+      ];
+    });
+    appendReportTable(combinationSection,
+      ["比较范围", "举报组平均子损", "计算方式", "总组合数", "已评估组合数", "低于或等于举报组的组合数", "下尾位置", "上尾位置", "双尾位置"], rows);
+  }
+
   function renderReportedAnalysis(report) {
     const data = report.reportedAnalysis;
     if (!data) return;
@@ -493,6 +528,7 @@
       section,
     );
     appendReportTable(engineSection, ["指标", "差值", "区间"], engineRows);
+    renderExactCombination(section, data.exactCombinations);
 
     const adaptation = data.adaptation || {};
     const hardRows = (Array.isArray(adaptation.hardMatchMetrics) ? adaptation.hardMatchMetrics : []).map((metric) => [

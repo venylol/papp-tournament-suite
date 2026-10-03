@@ -76,7 +76,7 @@ const PAPP_TOURNAMENT_WORKFILES_ENV = "PAPP_TOURNAMENT_WORKFILES_DIR";
 const HOST = process.env.PAPP_HOST || "127.0.0.1";
 const PORT = Number(process.env.PAPP_PORT || 4175);
 const SERVICE = "papp-local-frontend";
-const SERVICE_VERSION = "papp-local-frontend.38";
+const SERVICE_VERSION = "papp-local-frontend.39";
 const PLAYER_INVESTIGATION_ELIGIBILITY_POLICY = "at-least-16-coordinate-placements-v1";
 const PLAYER_INVESTIGATION_MINIMUM_ACTUAL_PLACEMENTS = 16;
 const PLAYER_INVESTIGATION_FIRST_ELIGIBLE_DECISION_PLY = 17;
@@ -613,6 +613,44 @@ function investigationSummaryInterval(value) {
   return lower === null || upper === null ? null : { lower, upper };
 }
 
+function reportedExactCombinationSummary(lossAndWld) {
+  return [
+    ["sameColor", "同色对局", lossAndWld.sameColorComparison],
+    ["allGames", "全部对局", lossAndWld.allGamesComparison],
+  ].map(([key, label, comparison]) => {
+    const data = comparison || {};
+    const result = data.exactCombination || {};
+    const sampled = result.status === "monte_carlo";
+    const reportedGameCount = investigationSummaryNumber(data.reported?.gameCount);
+    const controlGameCount = investigationSummaryNumber(data.control?.gameCount);
+    return {
+      key, label,
+      statistic: "game_equal_mean_disc_loss",
+      status: normalizeWhitespace(result.status) || "unavailable",
+      reportedGameCount,
+      controlGameCount,
+      universeGameCount: reportedGameCount === null || controlGameCount === null
+        ? null : reportedGameCount + controlGameCount,
+      reportedMeanLoss: investigationSummaryNumber(data.reported?.gameWeightedMeanLoss),
+      combinationCount: investigationSummaryNumber(result.combinationCount),
+      evaluatedCombinationCount: investigationSummaryNumber(
+        sampled ? result.sampledCombinationCount
+          : result.status === "computed" ? result.combinationCount : null,
+      ),
+      ascendingRank: sampled ? null : investigationSummaryNumber(result.ascendingRank),
+      lowerTailPosition: investigationSummaryNumber(
+        sampled ? result.lowerTailMonteCarloP : result.lowerTailExactP,
+      ),
+      upperTailPosition: investigationSummaryNumber(
+        sampled ? result.upperTailMonteCarloP : result.upperTailExactP,
+      ),
+      twoTailPosition: investigationSummaryNumber(
+        sampled ? result.twoTailMonteCarloP : result.twoTailRankP,
+      ),
+    };
+  });
+}
+
 function reportedAnalysisSummary(report) {
   const nonModel = report.nonModel && typeof report.nonModel === "object"
     ? report.nonModel
@@ -797,6 +835,7 @@ function reportedAnalysisSummary(report) {
     reportedSameColorGameCount: investigationSummaryNumber(reportedSameColor.gameCount),
     controlSameColorGameCount: investigationSummaryNumber(controlSameColor.gameCount),
     engineMetrics,
+    exactCombinations: reportedExactCombinationSummary(lossAndWld),
     adaptation: {
       evaluationRole: normalizeWhitespace(calibration.evaluationRole),
       hardMatchMetrics,
@@ -1369,7 +1408,7 @@ function startPlayerSentinelInvestigation(payload) {
     "--reference-config", PLAYER_SENTINEL_REFERENCE_CONFIG,
     "--elo-reference-config", PLAYER_SENTINEL_ELO_REFERENCE_CONFIG,
     "--bundle", sourceBundle,
-    // Let Python size scan workers using physical cores and 50% of total RAM.
+    // Python sizes scan workers against physical cores and 50% of installed RAM.
     "--pseudo-workers", "0",
   ];
   const job = startPlayerInvestigationProcess(runId, runDir, "sentinel", args);
