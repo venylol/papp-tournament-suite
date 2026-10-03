@@ -92,6 +92,11 @@ test("the rebuilt Windows C entry implements automatic/manual round counts and s
   assert.equal(auto.roundCount, 4);
   assert.equal(zero.roundCount, 4);
   assert.equal(aboveFloor.roundCount, 5);
+  for (const [playerCount, expected] of [[1, 4], [15, 4], [16, 5], [31, 5], [32, 6], [63, 6], [64, 7], [127, 7], [128, 8], [255, 8], [256, 9]]) {
+    const result = invokePappC({ operation: "round-count", playerCount }).response;
+    assert.equal(result.source, "papp-c");
+    assert.equal(result.roundCount, expected, `automatic rounds for ${playerCount} players`);
+  }
   assert.equal(manual.roundCount, 3);
   assert.equal(tooMany.ok, false);
   assert.deepEqual(complement.scorePair, { blackScore: 37, whiteScore: 27 });
